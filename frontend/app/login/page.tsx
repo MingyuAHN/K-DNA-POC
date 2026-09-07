@@ -116,7 +116,7 @@ export default function LoginPage() {
             </svg>
           </div>
           <div className="logo-text">
-            <span className="logo-title">Admin OS</span>
+            <span className="logo-title">K-DNA</span>
             <span className="logo-divider" />
             <span className="logo-subtitle">관리 시스템</span>
           </div>

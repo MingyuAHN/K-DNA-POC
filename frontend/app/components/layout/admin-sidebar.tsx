@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LogOut, ShieldCheck } from "lucide-react";
+import {
+  LogOut,
+  ShieldCheck,
+  LayoutDashboard,
+  Target,
+  Circle,
+} from "lucide-react";
 
 interface MenuItem {
   id: string;
@@ -18,6 +24,12 @@ interface UserInfo {
   role_id?: string | number;
   role_name?: string;
 }
+
+// 메뉴 아이콘 문자열을 lucide 아이콘 컴포넌트로 변환
+const iconMap: Record<string, React.ElementType> = {
+  LayoutDashboard,
+  Target,
+};
 
 export default function AdminSidebar({
   onLogoutOpen,
@@ -178,11 +190,13 @@ export default function AdminSidebar({
                 <p className="truncate text-base font-bold tracking-tight text-white sm:text-lg">
                   {user?.name || "불러오는 중..."}
                 </p>
+
                 <div className="mt-1.5 flex items-center gap-2 text-sm text-slate-400 sm:mt-2">
                   <span className="relative flex h-2.5 w-2.5">
                     <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70 [animation:dot-ping-soft_1.8s_ease-out_infinite]" />
                     <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
                   </span>
+
                   <span className="truncate">{displayRole}</span>
                 </div>
               </div>
@@ -223,6 +237,9 @@ export default function AdminSidebar({
               const isActive =
                 pathname === item.path || pathname.startsWith(item.path + "/");
 
+              // 등록되지 않은 아이콘은 기본 아이콘 사용
+              const Icon = iconMap[item.icon] || Circle;
+
               return (
                 <li
                   key={item.id}
@@ -246,13 +263,14 @@ export default function AdminSidebar({
                     />
 
                     <span
-                      className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-xl border text-lg transition-all duration-300 ${
+                      className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-xl border transition-all duration-300 ${
                         isActive
                           ? "border-blue-300/20 bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset] [animation:pulse-glow_2.6s_ease-in-out_infinite_alternate]"
-                          : "border-white/8 bg-white/[0.03] group-hover:border-blue-400/15 group-hover:bg-blue-500/10 group-hover:scale-105"
+                          : "border-white/8 bg-white/[0.03] group-hover:scale-105 group-hover:border-blue-400/15 group-hover:bg-blue-500/10"
                       }`}
                     >
-                      {item.icon}
+                      {/* 메뉴 아이콘 문자열을 실제 아이콘으로 렌더링 */}
+                      <Icon className="h-5 w-5" />
                     </span>
 
                     <div className="relative z-10 min-w-0 flex-1">
