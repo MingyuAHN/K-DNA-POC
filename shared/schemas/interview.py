@@ -10,6 +10,8 @@ from .enums import (
     ConflictSeverity,
     ValidationStatus,
     QuestionType,
+    RelationType,
+    RelationTargetType,
 )
 
 
@@ -92,6 +94,36 @@ class KnowledgeCandidate(BaseModel):
 # Knowledge Extractor 전용 Response
 class KnowledgeExtractionResponse(BaseModel):
     knowledge_candidates: List[KnowledgeCandidate] = Field(
+        default_factory=list
+    )
+
+
+# Semantic Alignment
+class SemanticRelation(BaseModel):
+    target_type: RelationTargetType
+    target_id: str
+
+    relation: RelationType
+
+    reason: str
+
+    context_difference: Optional[str] = None
+
+
+class SemanticAlignmentRequest(BaseModel):
+    candidate: KnowledgeCandidate
+
+    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+        default_factory=list
+    )
+
+    retrieved_evidence: List[RetrievedEvidence] = Field(
+        default_factory=list
+    )
+
+
+class SemanticAlignmentResponse(BaseModel):
+    relations: List[SemanticRelation] = Field(
         default_factory=list
     )
 
