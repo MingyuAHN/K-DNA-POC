@@ -76,7 +76,7 @@ export default function LoginPage() {
       if (res.ok) {
         const userData = {
           name: data.user.name,
-          role: data.user.role_name || "시스템 관리자",
+          role: data.user.role_name || "User",
           role_id: data.user.role_id,
           role_name: data.user.role_name,
           id: data.user.id,
@@ -128,7 +128,7 @@ export default function LoginPage() {
           <div className="card-inner">
             <div className="card-header">
               <h1 className="card-title">로그인</h1>
-              <p className="card-desc">관리자 계정으로 접속하세요</p>
+              <p className="card-desc">계정으로 접속하세요</p>
             </div>
 
             <form onSubmit={handleLogin} className="login-form">
@@ -144,7 +144,7 @@ export default function LoginPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="login-input"
-                    placeholder="관리자 성함을 입력하세요"
+                    placeholder="이름을 입력하세요"
                     required
                   />
                 </div>

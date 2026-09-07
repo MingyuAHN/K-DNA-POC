@@ -152,7 +152,7 @@ export default function UsersPage() {
   );
 
   const adminUsersCount = useMemo(
-    () => users.filter((user) => user.role_name.includes("관리자")).length,
+    () => users.filter((user) => user.role_name.includes("Admin")).length,
     [users]
   );
 
@@ -266,16 +266,12 @@ export default function UsersPage() {
   };
 
   const getRoleStyle = (role: string) => {
-    if (role.includes("관리자")) {
+    if (role === "Admin") {
       return "bg-slate-900 text-white border-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.12)]";
     }
 
-    if (role.includes("영업")) {
+    if (role === "User") {
       return "bg-blue-50 text-blue-600 border-blue-100 shadow-sm shadow-blue-50";
-    }
-
-    if (role.includes("상담")) {
-      return "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm shadow-emerald-50";
     }
 
     return "bg-slate-50 text-slate-500 border-slate-100";
@@ -370,7 +366,7 @@ export default function UsersPage() {
             tone: "bg-slate-900/10 text-slate-700 ring-slate-300/40",
           },
           {
-            label: "관리자 계정",
+            label: "Admin 계정",
             value: adminUsersCount.toString().padStart(2, "0"),
             icon: ShieldCheck,
             tone: "bg-violet-500/10 text-violet-600 ring-violet-500/15",

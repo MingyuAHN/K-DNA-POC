@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
     if (error || !user) {
       return NextResponse.json(
-        { error: "등록되지 않은 관리자 계정입니다." },
+        { error: " 등록되지 않은 계정입니다." },
         { status: 401 }
       );
     }

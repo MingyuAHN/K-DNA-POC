@@ -91,7 +91,7 @@ export default function RolesPage() {
   }, [roles, searchQuery]);
 
   const adminRoleCount = useMemo(() => {
-    return roles.filter((role) => role.name.includes("관리자")).length;
+    return roles.filter((role) => role.name.includes("Admin")).length;
   }, [roles]);
 
   const selectedMenusPreview = useMemo(() => {
@@ -267,7 +267,7 @@ export default function RolesPage() {
             tone: "bg-blue-500/10 text-blue-600 ring-blue-500/15",
           },
           {
-            label: "관리자 포함 역할",
+            label: "Admin 역할",
             value: adminRoleCount.toString().padStart(2, "0"),
             icon: Key,
             tone: "bg-indigo-500/10 text-indigo-600 ring-indigo-500/15",
@@ -499,7 +499,7 @@ export default function RolesPage() {
                       value={formData.name}
                       onChange={(e) => setFormData({ name: e.target.value })}
                       className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 text-sm font-semibold text-slate-900 outline-none transition-all focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
-                      placeholder="예: 운영 관리자"
+                      placeholder="예: Admin 또는 User"
                     />
                   </div>
 
