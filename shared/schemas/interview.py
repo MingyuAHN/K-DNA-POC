@@ -137,6 +137,31 @@ class KnowledgeGap(BaseModel):
     reason: str
 
 
+# Gap Analyzer 전용 Request
+class GapAnalysisRequest(BaseModel):
+    candidate: KnowledgeCandidate
+    mission: MissionContext
+
+    conversation_context: List[ConversationMessage] = Field(
+        default_factory=list
+    )
+
+    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+        default_factory=list
+    )
+
+    retrieved_evidence: List[RetrievedEvidence] = Field(
+        default_factory=list
+    )
+
+
+# Gap Analyzer 전용 Response
+class GapAnalysisResponse(BaseModel):
+    gaps: List[KnowledgeGap] = Field(
+        default_factory=list
+    )
+
+
 #Conflict
 class ConflictSource(BaseModel):
     source_type: str
