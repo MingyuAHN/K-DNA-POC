@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowUp,
@@ -18,11 +19,24 @@ import {
 } from "lucide-react";
 import { interviewMock } from "@/mocks/interviewMock";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
 interface ChatMessage {
   id: number;
   speaker: "AI" | "EXPERT";
   content: string;
   time: string;
+}
+
+interface MissionResponse {
+  mission_id: string;
+  title: string;
+  domain: string;
+  objective: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 const coverageIconMap = {
@@ -34,6 +48,9 @@ const coverageIconMap = {
 };
 
 export default function InterviewPage() {
+  const searchParams = useSearchParams();
+  const missionId = searchParams.get("missionId");
+
   // 전문가가 입력하는 현재 답변
   const [message, setMessage] = useState("");
 
@@ -42,9 +59,49 @@ export default function InterviewPage() {
     interviewMock.messages
   );
 
-  const mission = interviewMock.mission;
+  // Mission 조회 상태
+  const [mission, setMission] = useState<MissionResponse | null>(null);
+  const [missionLoading, setMissionLoading] = useState(true);
+  const [missionError, setMissionError] = useState("");
+
   const coverageItems = interviewMock.coverageItems;
   const insights = interviewMock.insights;
+
+  // URL의 missionId 기준 실제 Mission 조회
+  useEffect(() => {
+    const fetchMission = async () => {
+      if (!missionId) {
+        setMissionError("Mission ID가 없습니다.");
+        setMissionLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/missions/${missionId}`
+        );
+
+        if (!response.ok) {
+          throw new Error("Mission 조회에 실패했습니다.");
+        }
+
+        const data = (await response.json()) as MissionResponse;
+        setMission(data);
+      } catch (error) {
+        console.error("MISSION FETCH ERROR:", error);
+
+        setMissionError(
+          error instanceof Error
+            ? error.message
+            : "Mission 조회 중 오류가 발생했습니다."
+        );
+      } finally {
+        setMissionLoading(false);
+      }
+    };
+
+    fetchMission();
+  }, [missionId]);
 
   // 전문가 답변 전송
   const handleSubmit = (event: FormEvent) => {
@@ -114,18 +171,38 @@ export default function InterviewPage() {
               Current Mission
             </p>
 
-            <h2 className="mt-1 text-lg font-black text-slate-900">
-              {mission.title}
-            </h2>
+            {missionLoading ? (
+              <p className="mt-1 text-sm font-semibold text-slate-400">
+                Mission 정보를 불러오는 중입니다.
+              </p>
+            ) : missionError ? (
+              <p className="mt-1 text-sm font-semibold text-rose-500">
+                {missionError}
+              </p>
+            ) : mission ? (
+              <>
+                <h2 className="mt-1 text-lg font-black text-slate-900">
+                  {mission.title}
+                </h2>
 
-            <p className="mt-1 text-xs font-semibold text-slate-500">
-              {mission.expertRole}
-            </p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  {mission.domain}
+                </p>
+
+                {mission.objective && (
+                  <p className="mt-1 text-xs font-medium text-slate-400">
+                    {mission.objective}
+                  </p>
+                )}
+              </>
+            ) : null}
           </div>
 
-          <div className="rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-600">
-            {mission.statusLabel}
-          </div>
+          {mission && (
+            <div className="rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-600">
+              {mission.status}
+            </div>
+          )}
         </section>
 
         {/* Interview 3단 구조 */}
@@ -218,7 +295,6 @@ export default function InterviewPage() {
               </div>
             </div>
 
-            {/* 대화 내용 */}
             <div className="flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-5">
               {messages.map((item) => {
                 const isAI = item.speaker === "AI";
@@ -248,9 +324,8 @@ export default function InterviewPage() {
                           {isAI ? "K-DNA AI" : "Expert"} · {item.time}
                         </span>
                       </div>
-
                       <div
-                        className={`rounded-2xl px-4 py-3 text-sm font-medium leading-6 shadow-sm ${
+                        className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-sm font-medium leading-6 shadow-sm ${
                           isAI
                             ? "rounded-tl-md border border-slate-200 bg-white text-slate-700"
                             : "rounded-tr-md bg-slate-900 text-white"
@@ -270,7 +345,6 @@ export default function InterviewPage() {
               })}
             </div>
 
-            {/* 전문가 답변 입력 */}
             <form
               onSubmit={handleSubmit}
               className="border-t border-slate-200 bg-white p-4"
@@ -293,7 +367,6 @@ export default function InterviewPage() {
                 </button>
               </div>
 
-              {/* 인터뷰 종료 버튼 */}
               <button
                 type="button"
                 onClick={handleEndInterview}
@@ -324,7 +397,6 @@ export default function InterviewPage() {
             </div>
 
             <div className="space-y-3">
-              {/* New Rule */}
               <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
                 <div className="mb-2 flex items-center gap-2 text-blue-600">
                   <BookOpen className="h-4 w-4" />
@@ -343,7 +415,6 @@ export default function InterviewPage() {
                 </p>
               </div>
 
-              {/* Exception */}
               <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
                 <div className="mb-2 flex items-center gap-2 text-amber-600">
                   <ShieldAlert className="h-4 w-4" />
@@ -362,7 +433,6 @@ export default function InterviewPage() {
                 </p>
               </div>
 
-              {/* Conflict */}
               <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4">
                 <div className="mb-2 flex items-center gap-2 text-rose-600">
                   <AlertTriangle className="h-4 w-4" />
@@ -381,7 +451,6 @@ export default function InterviewPage() {
                 </p>
               </div>
 
-              {/* Gap */}
               <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
                 <div className="mb-2 flex items-center gap-2 text-violet-600">
                   <CircleAlert className="h-4 w-4" />
