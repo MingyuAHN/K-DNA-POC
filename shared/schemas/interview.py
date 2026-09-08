@@ -181,6 +181,31 @@ class ConflictResult(BaseModel):
     recommended_question: Optional[str] = None
 
 
+# Conflict Detector 전용 Request
+class ConflictAnalysisRequest(BaseModel):
+    candidate: KnowledgeCandidate
+    mission: MissionContext
+
+    semantic_relations: List[SemanticRelation] = Field(
+        default_factory=list
+    )
+
+    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+        default_factory=list
+    )
+
+    retrieved_evidence: List[RetrievedEvidence] = Field(
+        default_factory=list
+    )
+
+
+# Conflict Detector 전용 Response
+class ConflictAnalysisResponse(BaseModel):
+    conflicts: List[ConflictResult] = Field(
+        default_factory=list
+    )
+
+
 #Question Candidate Schema
 class QuestionCandidate(BaseModel):
     question: str
