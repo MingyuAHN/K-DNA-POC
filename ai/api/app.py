@@ -1,5 +1,7 @@
+import os
 from functools import lru_cache
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 
 from shared.schemas.seed import (
@@ -10,6 +12,9 @@ from shared.schemas.seed import (
 from ai.agents.baseline_claim_extractor import (
     BaselineClaimExtractor,
 )
+
+
+load_dotenv()
 
 
 app = FastAPI(
@@ -27,10 +32,30 @@ def health():
 
 @lru_cache
 def get_baseline_claim_extractor():
-    # 실제 요청이 들어올 때만 Gateway 생성
-    from ai.services.openai_gateway import OpenAIGateway
 
-    gateway = OpenAIGateway()
+    provider = os.getenv(
+        "LLM_PROVIDER",
+        "openai",
+    ).lower()
+
+    if provider == "mock":
+        from ai.services.mock_gateway import (
+            MockLLMGateway,
+        )
+
+        gateway = MockLLMGateway()
+
+    elif provider == "openai":
+        from ai.services.openai_gateway import (
+            OpenAIGateway,
+        )
+
+        gateway = OpenAIGateway()
+
+    else:
+        raise ValueError(
+            f"지원하지 않는 LLM_PROVIDER: {provider}"
+        )
 
     return BaselineClaimExtractor(
         llm_gateway=gateway
