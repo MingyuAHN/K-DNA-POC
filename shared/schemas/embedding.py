@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class EmbeddingItemType(str, Enum):
     CHUNK = "CHUNK"
     BASELINE_CLAIM = "BASELINE_CLAIM"
-
+    QUERY = "QUERY"
 
 class EmbeddingItemRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
