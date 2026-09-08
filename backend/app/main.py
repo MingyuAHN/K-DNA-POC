@@ -2,8 +2,36 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.v1.documents import router as document_router
-from app.api.v1.missions import router as mission_router
+from app.api.v1.baseline_claims import (
+    router as baseline_claim_router,
+)
+from app.api.v1.documents import (
+    router as document_router,
+)
+from app.api.v1.embeddings import (
+    router as embedding_router,
+)
+from app.api.v1.experts import (
+    router as expert_router,
+)
+from app.api.v1.interview_analyses import (
+    router as interview_analysis_router,
+)
+from app.api.v1.interviews import (
+    router as interview_router,
+)
+from app.api.v1.knowledge import (
+    router as knowledge_router,
+)
+from app.api.v1.knowledge_graph import (
+    router as knowledge_graph_router,
+)
+from app.api.v1.missions import (
+    router as mission_router,
+)
+from app.api.v1.retrieval import (
+    router as retrieval_router,
+)
 from app.db.session import get_db
 
 
@@ -12,8 +40,17 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
 app.include_router(mission_router)
 app.include_router(document_router)
+app.include_router(baseline_claim_router)
+app.include_router(embedding_router)
+app.include_router(expert_router)
+app.include_router(interview_router)
+app.include_router(interview_analysis_router)
+app.include_router(retrieval_router)
+app.include_router(knowledge_router)
+app.include_router(knowledge_graph_router)
 
 
 @app.get("/health")

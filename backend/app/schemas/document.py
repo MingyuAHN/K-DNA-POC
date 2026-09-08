@@ -15,3 +15,21 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class DocumentParseResponse(BaseModel):
+    document_id: uuid.UUID
+    processing_status: str
+    raw_text_length: int
+    raw_text_preview: str
+
+class ChunkSummary(BaseModel):
+    chunk_id: uuid.UUID
+    seq: int
+    content_preview: str
+
+
+class DocumentChunkResponse(BaseModel):
+    document_id: uuid.UUID
+    processing_status: str
+    chunk_count: int
+    chunks: list[ChunkSummary]
