@@ -6,16 +6,13 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar(
+    "T",
+    bound=BaseModel,
+)
 
 
 class OpenAIGateway:
-    """
-    OpenAI Provider용 LLM Gateway 구현체.
-
-    Agent는 OpenAI SDK를 직접 호출하지 않고
-    이 Gateway를 통해 Structured Output을 요청한다.
-    """
 
     def __init__(
         self,
@@ -23,14 +20,19 @@ class OpenAIGateway:
     ):
         load_dotenv()
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv(
+            "OPENAI_API_KEY"
+        )
 
         if not api_key:
             raise ValueError(
                 "OPENAI_API_KEY가 설정되어 있지 않습니다."
             )
 
-        self.model = model or os.getenv("OPENAI_MODEL")
+        self.model = (
+            model
+            or os.getenv("OPENAI_MODEL")
+        )
 
         if not self.model:
             raise ValueError(

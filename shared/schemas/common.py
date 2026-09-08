@@ -3,7 +3,9 @@ from typing import Optional, List
 
 
 class ContextTags(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="forbid"
+    )
 
     project: Optional[str] = None
     phase: Optional[str] = None
@@ -11,5 +13,11 @@ class ContextTags(BaseModel):
     system: Optional[str] = None
     scope: Optional[str] = None
     time: Optional[str] = None
-    constraints: List[str] = Field(default_factory=list)
-    tags: List[str] = Field(default_factory=list)
+
+    constraints: List[str] = Field(
+        default_factory=list
+    )
+
+    tags: List[str] = Field(
+        default_factory=list
+    )
