@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,15 @@ from app.db.session import get_db
 app = FastAPI(
     title="K-DNA PoC Backend",
     version="0.1.0",
+)
+
+# 로컬 Frontend에서 Backend API 호출 허용
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(mission_router)
