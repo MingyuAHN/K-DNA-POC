@@ -40,7 +40,7 @@ expert_id: {interview.expert_id}
 {[message.model_dump() for message in request.conversation_context]}
 
 [Expert Answer]
-{request.expert_answer}
+{request.message.content}
 """
 
         return self.llm.generate_structured(

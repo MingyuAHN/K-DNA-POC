@@ -22,6 +22,20 @@ from ai.services.embedding_service import (
     EmbeddingService,
 )
 
+from shared.schemas.interview import (
+    InterviewAnalysisRequest,
+    InterviewAnalysisResponse,
+)
+
+from ai.agents.knowledge_extractor import KnowledgeExtractor
+from ai.agents.semantic_aligner import SemanticAligner
+from ai.agents.gap_analyzer import GapAnalyzer
+from ai.agents.conflict_detector import ConflictDetector
+from ai.agents.question_planner import QuestionPlanner
+
+from ai.services.orchestrator import AIOrchestrator
+from ai.services.openai_gateway import OpenAIGateway
+
 load_dotenv()
 
 
@@ -105,6 +119,39 @@ def create_embeddings(
         service = get_embedding_service()
 
         return service.embed(request)
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@lru_cache
+def get_interview_orchestrator():
+    gateway = OpenAIGateway()
+
+    return AIOrchestrator(
+        knowledge_extractor=KnowledgeExtractor(gateway),
+        semantic_aligner=SemanticAligner(gateway),
+        gap_analyzer=GapAnalyzer(gateway),
+        conflict_detector=ConflictDetector(gateway),
+        question_planner=QuestionPlanner(gateway),
+    )
+
+@app.post(
+    "/api/v1/ai/interviews/analyze",
+    response_model=InterviewAnalysisResponse,
+)
+def analyze_interview(
+    request: InterviewAnalysisRequest,
+):
+    try:
+        orchestrator = get_interview_orchestrator()
+
+        return orchestrator.analyze(
+            request
+        )
 
     except Exception as exc:
         raise HTTPException(

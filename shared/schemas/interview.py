@@ -53,11 +53,11 @@ class InterviewAnalysisRequest(BaseModel):
     mission: MissionContext
     interview: InterviewContext
 
+    message: ConversationMessage
+
     conversation_context: List[ConversationMessage] = Field(
         default_factory=list
     )
-
-    expert_answer: str
 
     retrieved_knowledge: List[RetrievedKnowledge] = Field(
         default_factory=list
