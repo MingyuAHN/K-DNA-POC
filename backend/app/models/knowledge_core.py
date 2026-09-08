@@ -47,6 +47,28 @@ class KnowledgeUnit(Base):
         unique=True,
     )
 
+    source_synthesis_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "knowledge_synthesis.synthesis_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    source_synthesis_unit_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "knowledge_synthesis_unit.synthesis_unit_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
     knowledge_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -57,7 +79,9 @@ class KnowledgeUnit(Base):
         nullable=False,
     )
 
-    context: Mapped[dict[str, Any]] = mapped_column(
+    context: Mapped[
+        dict[str, Any]
+    ] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -70,12 +94,16 @@ class KnowledgeUnit(Base):
         nullable=True,
     )
 
-    rationale: Mapped[str | None] = mapped_column(
+    rationale: Mapped[
+        str | None
+    ] = mapped_column(
         Text,
         nullable=True,
     )
 
-    exception: Mapped[str | None] = mapped_column(
+    exception: Mapped[
+        str | None
+    ] = mapped_column(
         Text,
         nullable=True,
     )
@@ -121,7 +149,9 @@ class KnowledgeUnit(Base):
         nullable=True,
     )
 
-    change_reason: Mapped[str | None] = mapped_column(
+    change_reason: Mapped[
+        str | None
+    ] = mapped_column(
         Text,
         nullable=True,
     )
@@ -135,6 +165,7 @@ class KnowledgeUnit(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
@@ -142,13 +173,17 @@ class KnowledgeUnit(Base):
 class Validation(Base):
     __tablename__ = "validation"
 
-    validation_id: Mapped[uuid.UUID] = mapped_column(
+    validation_id: Mapped[
+        uuid.UUID
+    ] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
     )
 
-    candidate_id: Mapped[uuid.UUID] = mapped_column(
+    candidate_id: Mapped[
+        uuid.UUID
+    ] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "knowledge_candidate.candidate_id",
@@ -178,12 +213,16 @@ class Validation(Base):
         nullable=False,
     )
 
-    reason: Mapped[str | None] = mapped_column(
+    reason: Mapped[
+        str | None
+    ] = mapped_column(
         Text,
         nullable=True,
     )
 
-    validated_by: Mapped[str | None] = mapped_column(
+    validated_by: Mapped[
+        str | None
+    ] = mapped_column(
         String(200),
         nullable=True,
     )
@@ -198,13 +237,17 @@ class Validation(Base):
 class Evidence(Base):
     __tablename__ = "evidence"
 
-    evidence_id: Mapped[uuid.UUID] = mapped_column(
+    evidence_id: Mapped[
+        uuid.UUID
+    ] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
     )
 
-    knowledge_id: Mapped[uuid.UUID] = mapped_column(
+    knowledge_id: Mapped[
+        uuid.UUID
+    ] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "knowledge_unit.knowledge_id",
@@ -223,7 +266,9 @@ class Evidence(Base):
         nullable=False,
     )
 
-    source_text: Mapped[str | None] = mapped_column(
+    source_text: Mapped[
+        str | None
+    ] = mapped_column(
         Text,
         nullable=True,
     )
@@ -235,7 +280,9 @@ class Evidence(Base):
         nullable=True,
     )
 
-    metadata_: Mapped[dict[str, Any]] = mapped_column(
+    metadata_: Mapped[
+        dict[str, Any]
+    ] = mapped_column(
         "metadata",
         JSONB,
         nullable=False,
@@ -252,13 +299,17 @@ class Evidence(Base):
 class KnowledgeRelation(Base):
     __tablename__ = "knowledge_relation"
 
-    relation_id: Mapped[uuid.UUID] = mapped_column(
+    relation_id: Mapped[
+        uuid.UUID
+    ] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
     )
 
-    mission_id: Mapped[uuid.UUID] = mapped_column(
+    mission_id: Mapped[
+        uuid.UUID
+    ] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "mission.mission_id",

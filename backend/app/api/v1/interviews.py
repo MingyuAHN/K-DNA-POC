@@ -19,12 +19,18 @@ from app.schemas.interview_context import (
     InterviewContextPreviewRequest,
     InterviewContextPreviewResponse,
 )
+from app.schemas.interview_list import (
+    MissionInterviewListResponse,
+)
 from app.schemas.interview_orchestration import (
     InterviewTurnRequest,
     InterviewTurnResponse,
 )
 from app.services.interview_context_service import (
     build_interview_context,
+)
+from app.services.interview_query_service import (
+    get_mission_interviews,
 )
 from app.services.interview_service import (
     add_interview_message,
@@ -56,6 +62,26 @@ def create_interview_api(
         db=db,
         mission_id=mission_id,
         request=request,
+    )
+
+
+@router.get(
+    "/missions/{mission_id}/interviews",
+    response_model=MissionInterviewListResponse,
+)
+def get_mission_interviews_api(
+    mission_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    interviews = get_mission_interviews(
+        db=db,
+        mission_id=mission_id,
+    )
+
+    return MissionInterviewListResponse(
+        mission_id=mission_id,
+        total=len(interviews),
+        interviews=interviews,
     )
 
 

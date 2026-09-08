@@ -65,6 +65,14 @@ class InterviewAnalysis(Base):
         nullable=True,
     )
 
+    request_context: Mapped[
+        dict[str, Any]
+    ] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+
     raw_response: Mapped[
         dict[str, Any]
     ] = mapped_column(

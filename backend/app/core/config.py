@@ -1,4 +1,7 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 
 class Settings(BaseSettings):
@@ -11,7 +14,9 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_secret_key: str
 
-    ai_base_url: str = "http://127.0.0.1:8001"
+    ai_base_url: str = (
+        "http://127.0.0.1:8001"
+    )
 
     ai_baseline_claim_path: str = (
         "/api/v1/ai/baseline-claims/extract"
@@ -23,6 +28,10 @@ class Settings(BaseSettings):
 
     ai_interview_analyze_path: str = (
         "/api/v1/ai/interviews/analyze"
+    )
+
+    ai_knowledge_synthesis_path: str = (
+        "/api/v1/ai/knowledge/synthesize"
     )
 
     ai_request_timeout: float = 60.0

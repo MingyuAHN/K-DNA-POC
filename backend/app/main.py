@@ -26,6 +26,15 @@ from app.api.v1.knowledge import (
 from app.api.v1.knowledge_graph import (
     router as knowledge_graph_router,
 )
+from app.api.v1.knowledge_synthesis import (
+    router as knowledge_synthesis_router,
+)
+from app.api.v1.knowledge_synthesis_validation import (
+    router as knowledge_synthesis_validation_router,
+)
+from app.api.v1.knowledge_versions import (
+    router as knowledge_version_router,
+)
 from app.api.v1.missions import (
     router as mission_router,
 )
@@ -51,6 +60,11 @@ app.include_router(interview_analysis_router)
 app.include_router(retrieval_router)
 app.include_router(knowledge_router)
 app.include_router(knowledge_graph_router)
+app.include_router(knowledge_version_router)
+app.include_router(knowledge_synthesis_router)
+app.include_router(
+    knowledge_synthesis_validation_router
+)
 
 
 @app.get("/health")
@@ -65,7 +79,9 @@ def health_check():
 def database_health(
     db: Session = Depends(get_db),
 ):
-    db.execute(text("SELECT 1"))
+    db.execute(
+        text("SELECT 1")
+    )
 
     return {
         "status": "ok",

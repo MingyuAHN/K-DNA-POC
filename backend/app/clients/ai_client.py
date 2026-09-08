@@ -12,6 +12,10 @@ from app.schemas.embedding import (
 from app.schemas.interview_orchestration import (
     InterviewOrchestrationResponse,
 )
+from app.schemas.knowledge_synthesis import (
+    KnowledgeSynthesisAIRequest,
+    KnowledgeSynthesisAIResponse,
+)
 
 
 class AIClientError(Exception):
@@ -20,24 +24,41 @@ class AIClientError(Exception):
 
 class AIClient:
     def __init__(self) -> None:
-        self.base_url = settings.ai_base_url.rstrip("/")
+        self.base_url = (
+            settings.ai_base_url.rstrip("/")
+        )
 
         self.baseline_claim_path = (
             "/"
-            + settings.ai_baseline_claim_path.lstrip("/")
+            + settings
+            .ai_baseline_claim_path
+            .lstrip("/")
         )
 
         self.embedding_path = (
             "/"
-            + settings.ai_embedding_path.lstrip("/")
+            + settings
+            .ai_embedding_path
+            .lstrip("/")
         )
 
         self.interview_analyze_path = (
             "/"
-            + settings.ai_interview_analyze_path.lstrip("/")
+            + settings
+            .ai_interview_analyze_path
+            .lstrip("/")
         )
 
-        self.timeout = settings.ai_request_timeout
+        self.knowledge_synthesis_path = (
+            "/"
+            + settings
+            .ai_knowledge_synthesis_path
+            .lstrip("/")
+        )
+
+        self.timeout = (
+            settings.ai_request_timeout
+        )
 
     def _post(
         self,
@@ -45,7 +66,9 @@ class AIClient:
         payload: dict,
     ) -> dict:
 
-        url = f"{self.base_url}{path}"
+        url = (
+            f"{self.base_url}{path}"
+        )
 
         try:
             response = httpx.post(
@@ -65,7 +88,8 @@ class AIClient:
 
         except httpx.ConnectError as exc:
             raise AIClientError(
-                f"Could not connect to AI server: {exc}"
+                "Could not connect to "
+                f"AI server: {exc}"
             ) from exc
 
         except httpx.HTTPStatusError as exc:
@@ -82,12 +106,15 @@ class AIClient:
 
         except ValueError as exc:
             raise AIClientError(
-                f"AI server returned invalid JSON: {exc}"
+                "AI server returned "
+                f"invalid JSON: {exc}"
             ) from exc
 
     def extract_baseline_claims(
         self,
-        request: BaselineClaimExtractionRequest,
+        request: (
+            BaselineClaimExtractionRequest
+        ),
     ) -> BaselineClaimExtractionResponse:
 
         data = self._post(
@@ -105,8 +132,8 @@ class AIClient:
 
         except Exception as exc:
             raise AIClientError(
-                "Invalid baseline claim response "
-                f"schema: {exc}"
+                "Invalid baseline claim "
+                f"response schema: {exc}"
             ) from exc
 
     def create_embeddings(
@@ -122,8 +149,9 @@ class AIClient:
         )
 
         try:
-            return EmbeddingResponse.model_validate(
-                data
+            return (
+                EmbeddingResponse
+                .model_validate(data)
             )
 
         except Exception as exc:
@@ -151,6 +179,32 @@ class AIClient:
         except Exception as exc:
             raise AIClientError(
                 "Invalid interview orchestration "
+                f"response schema: {exc}"
+            ) from exc
+
+    def synthesize_knowledge(
+        self,
+        request: KnowledgeSynthesisAIRequest,
+    ) -> KnowledgeSynthesisAIResponse:
+
+        data = self._post(
+            path=(
+                self.knowledge_synthesis_path
+            ),
+            payload=request.model_dump(
+                mode="json"
+            ),
+        )
+
+        try:
+            return (
+                KnowledgeSynthesisAIResponse
+                .model_validate(data)
+            )
+
+        except Exception as exc:
+            raise AIClientError(
+                "Invalid knowledge synthesis "
                 f"response schema: {exc}"
             ) from exc
 
