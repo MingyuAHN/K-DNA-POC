@@ -222,6 +222,31 @@ class QuestionCandidate(BaseModel):
     value_score: float = Field(ge=0, le=1)
 
 
+class QuestionPlanningRequest(BaseModel):
+    candidate: KnowledgeCandidate
+    mission: MissionContext
+
+    gaps: List[KnowledgeGap] = Field(
+        default_factory=list
+    )
+
+    conflicts: List[ConflictResult] = Field(
+        default_factory=list
+    )
+
+    conversation_context: List[ConversationMessage] = Field(
+        default_factory=list
+    )
+
+
+class QuestionPlanningResponse(BaseModel):
+    question_candidates: List[QuestionCandidate] = Field(
+        default_factory=list
+    )
+
+    next_question: Optional[QuestionCandidate] = None
+
+
 #최종 Response
 class InterviewAnalysisResponse(BaseModel):
     knowledge_candidates: List[KnowledgeCandidate] = Field(
