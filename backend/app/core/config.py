@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     db_port: int = 5432
     db_name: str = "postgres"
 
+    supabase_url: str
+    supabase_secret_key: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
