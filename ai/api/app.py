@@ -13,6 +13,14 @@ from ai.agents.baseline_claim_extractor import (
     BaselineClaimExtractor,
 )
 
+from shared.schemas.embedding import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+)
+
+from ai.services.embedding_service import (
+    EmbeddingService,
+)
 
 load_dotenv()
 
@@ -73,6 +81,30 @@ def extract_baseline_claims(
         extractor = get_baseline_claim_extractor()
 
         return extractor.extract(request)
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@lru_cache
+def get_embedding_service():
+    return EmbeddingService()
+
+
+@app.post(
+    "/api/v1/ai/embeddings",
+    response_model=EmbeddingResponse,
+)
+def create_embeddings(
+    request: EmbeddingRequest,
+):
+    try:
+        service = get_embedding_service()
+
+        return service.embed(request)
 
     except Exception as exc:
         raise HTTPException(

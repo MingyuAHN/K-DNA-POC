@@ -1,9 +1,7 @@
 import json
 from pathlib import Path
 
-from shared.schemas.interview import (
-    InterviewAnalysisRequest,
-)
+from shared.schemas.interview import InterviewAnalysisRequest
 
 from ai.agents.knowledge_extractor import KnowledgeExtractor
 from ai.agents.semantic_aligner import SemanticAligner
@@ -16,7 +14,6 @@ from ai.services.orchestrator import AIOrchestrator
 
 
 def main():
-
     fixture_path = (
         Path(__file__).resolve().parents[1]
         / "fixtures"
@@ -24,14 +21,10 @@ def main():
     )
 
     data = json.loads(
-        fixture_path.read_text(
-            encoding="utf-8"
-        )
+        fixture_path.read_text(encoding="utf-8")
     )
 
-    request = InterviewAnalysisRequest.model_validate(
-        data
-    )
+    request = InterviewAnalysisRequest.model_validate(data)
 
     gateway = OpenAIGateway()
 
@@ -45,11 +38,8 @@ def main():
 
     result = orchestrator.analyze(request)
 
-    print(
-        result.model_dump_json(
-            indent=2
-        )
-    )
+    print("\n===== K-DNA REAL LLM RESULT =====\n")
+    print(result.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":
