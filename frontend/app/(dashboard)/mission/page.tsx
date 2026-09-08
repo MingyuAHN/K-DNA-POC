@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BriefcaseBusiness,
+  Building2,
   CalendarDays,
   ChevronDown,
   FileText,
@@ -17,6 +18,10 @@ import {
   createMission,
   uploadMissionDocument,
 } from "@/services/mission";
+import {
+  createExpert,
+  createInterview,
+} from "@/services/interview";
 
 export default function MissionPage() {
   const router = useRouter();
@@ -30,6 +35,8 @@ export default function MissionPage() {
   const [objective, setObjective] = useState("");
 
   // Expert 사용자 입력 정보
+  const [expertName, setExpertName] = useState("");
+  const [organization, setOrganization] = useState("");
   const [expertRole, setExpertRole] = useState("");
   const [experience, setExperience] = useState("");
   const [specialties, setSpecialties] = useState("");
@@ -64,6 +71,8 @@ export default function MissionPage() {
     setMissionName("");
     setDomain("");
     setObjective("");
+    setExpertName("");
+    setOrganization("");
     setExpertRole("");
     setExperience("");
     setSpecialties("");
@@ -72,7 +81,11 @@ export default function MissionPage() {
     setSubmitMessage("");
   };
 
-  // 미션 생성 → mission_id 기준 Seed 문서 업로드
+  // Mission 생성
+  // → Seed 문서 업로드
+  // → Expert 등록
+  // → Interview 생성
+  // → Interview 화면 이동
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
@@ -92,14 +105,18 @@ export default function MissionPage() {
       objective,
     };
 
-    // Expert API 구현 전까지 입력 구조만 유지
+    // Expert 등록 API 입력값
     const expertPayload = {
+      name: expertName,
+      organization,
       role: expertRole,
-      experience_years: Number(experience),
-      specialties: specialties
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
+      metadata: {
+        experience_years: Number(experience),
+        specialties: specialties
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      },
     };
 
     try {
@@ -112,22 +129,32 @@ export default function MissionPage() {
         await uploadMissionDocument(missionId, file);
       }
 
+      // 3. Expert 등록
+      const createdExpert = await createExpert(expertPayload);
+      const expertId = createdExpert.expert_id;
+
+      // 4. Interview 생성
+      const createdInterview = await createInterview(missionId, {
+        expert_id: expertId,
+        title: `${createdMission.title} - ${createdExpert.name} 인터뷰`,
+      });
+
+      const interviewId = createdInterview.interview_id;
+
       console.log("MISSION ID:", missionId);
-      console.log("MISSION PAYLOAD:", missionPayload);
-      console.log("EXPERT PAYLOAD:", expertPayload);
-      console.log("SEED FILES:", files);
+      console.log("EXPERT ID:", expertId);
+      console.log("INTERVIEW ID:", interviewId);
 
       setSubmitMessage(
-        "미션 생성 및 Seed 문서 업로드가 완료되었습니다."
+        "미션, 전문가 및 인터뷰 생성이 완료되었습니다."
       );
 
-      // 생성된 Mission ID를 Interview 화면으로 전달
-      router.push(`/interview?missionId=${missionId}`);
-
-      // TODO: Expert / Interview API 구현 후
-      // 1. Expert 등록 → expert_id 수신
-      // 2. Interview 생성 → interview_id 수신
-      // 3. interview_id도 Interview 화면으로 전달
+      // 생성된 Mission / Interview ID를 Interview 화면으로 전달
+      router.push(
+        `/interview?missionId=${encodeURIComponent(
+          missionId
+        )}&interviewId=${encodeURIComponent(interviewId)}`
+      );
     } catch (error) {
       console.error("MISSION CREATE ERROR:", error);
 
@@ -262,11 +289,55 @@ export default function MissionPage() {
                 </p>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {/* 전문가 이름 */}
+                <div className="space-y-1.5">
+                  <label className={labelClass}>
+                    전문가 이름{" "}
+                    <span className="text-rose-500">*</span>
+                  </label>
+
+                  <div className="relative">
+                    <UserRound className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
+
+                    <input
+                      type="text"
+                      value={expertName}
+                      onChange={(e) => setExpertName(e.target.value)}
+                      placeholder="예: 홍길동"
+                      className={iconInputClass}
+                      required
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                </div>
+
+                {/* 전문가 소속 */}
+                <div className="space-y-1.5">
+                  <label className={labelClass}>
+                    소속 <span className="text-rose-500">*</span>
+                  </label>
+
+                  <div className="relative">
+                    <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
+
+                    <input
+                      type="text"
+                      value={organization}
+                      onChange={(e) => setOrganization(e.target.value)}
+                      placeholder="예: Platform Engineering Team"
+                      className={iconInputClass}
+                      required
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                </div>
+
                 {/* 전문가 역할 */}
                 <div className="space-y-1.5">
                   <label className={labelClass}>
-                    전문가 역할 <span className="text-rose-500">*</span>
+                    전문가 역할{" "}
+                    <span className="text-rose-500">*</span>
                   </label>
 
                   <div className="relative">
@@ -311,9 +382,10 @@ export default function MissionPage() {
                 </div>
 
                 {/* 전문가 전문 분야 */}
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 md:col-span-2">
                   <label className={labelClass}>
-                    전문 분야 <span className="text-rose-500">*</span>
+                    전문 분야{" "}
+                    <span className="text-rose-500">*</span>
                   </label>
 
                   <div className="relative">

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
@@ -18,26 +18,12 @@ import {
   UserRound,
 } from "lucide-react";
 import { interviewMock } from "@/mocks/interviewMock";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
-
-interface ChatMessage {
-  id: number;
-  speaker: "AI" | "EXPERT";
-  content: string;
-  time: string;
-}
-
-interface MissionResponse {
-  mission_id: string;
-  title: string;
-  domain: string;
-  objective: string | null;
-  status: string;
-  created_at: string;
-  updated_at: string;
-}
+import { getMission, type MissionResponse } from "@/services/mission";
+import {
+  getInterviewMessages,
+  sendInterviewMessage,
+  type InterviewMessage,
+} from "@/services/interview";
 
 const coverageIconMap = {
   layers: Layers3,
@@ -47,23 +33,43 @@ const coverageIconMap = {
   warning: AlertTriangle,
 };
 
+function formatMessageTime(createdAt: string) {
+  const date = new Date(createdAt);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 export default function InterviewPage() {
   const searchParams = useSearchParams();
+
   const missionId = searchParams.get("missionId");
+  const interviewId = searchParams.get("interviewId");
 
   // 전문가가 입력하는 현재 답변
   const [message, setMessage] = useState("");
 
-  // 인터뷰 대화 목록
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    interviewMock.messages
-  );
+  // 실제 Interview 대화 목록
+  const [messages, setMessages] = useState<InterviewMessage[]>([]);
 
   // Mission 조회 상태
   const [mission, setMission] = useState<MissionResponse | null>(null);
   const [missionLoading, setMissionLoading] = useState(true);
   const [missionError, setMissionError] = useState("");
 
+  // Interview 메시지 조회 / 전송 상태
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [messageError, setMessageError] = useState("");
+  const [isSending, setIsSending] = useState(false);
+
+  // 아직 실제 API 미연동 영역
   const coverageItems = interviewMock.coverageItems;
   const insights = interviewMock.insights;
 
@@ -77,15 +83,11 @@ export default function InterviewPage() {
       }
 
       try {
-        const response = await fetch(
-          `${API_BASE_URL}/api/v1/missions/${missionId}`
-        );
+        setMissionLoading(true);
+        setMissionError("");
 
-        if (!response.ok) {
-          throw new Error("Mission 조회에 실패했습니다.");
-        }
+        const data = await getMission(missionId);
 
-        const data = (await response.json()) as MissionResponse;
         setMission(data);
       } catch (error) {
         console.error("MISSION FETCH ERROR:", error);
@@ -103,48 +105,82 @@ export default function InterviewPage() {
     fetchMission();
   }, [missionId]);
 
+  // Interview 대화 이력 조회
+  const fetchMessages = useCallback(async () => {
+    if (!interviewId) {
+      setMessageError("Interview ID가 없습니다.");
+      setMessagesLoading(false);
+      return;
+    }
+
+    try {
+      setMessagesLoading(true);
+      setMessageError("");
+
+      const data = await getInterviewMessages(interviewId);
+
+      setMessages(data.messages);
+    } catch (error) {
+      console.error("INTERVIEW MESSAGES FETCH ERROR:", error);
+
+      setMessageError(
+        error instanceof Error
+          ? error.message
+          : "인터뷰 대화 이력을 불러오는 중 오류가 발생했습니다."
+      );
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [interviewId]);
+
+  useEffect(() => {
+    fetchMessages();
+  }, [fetchMessages]);
+
   // 전문가 답변 전송
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
     const trimmedMessage = message.trim();
 
-    if (!trimmedMessage) return;
+    if (!trimmedMessage || isSending) {
+      return;
+    }
 
-    const now = new Date();
+    if (!interviewId) {
+      setMessageError("Interview ID가 없습니다.");
+      return;
+    }
 
-    const time = now.toLocaleTimeString("ko-KR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    try {
+      setIsSending(true);
+      setMessageError("");
 
-    const newMessage: ChatMessage = {
-      id: Date.now(),
-      speaker: "EXPERT",
-      content: trimmedMessage,
-      time,
-    };
+      // Expert 답변 저장
+      await sendInterviewMessage(interviewId, {
+        content: trimmedMessage,
+      });
 
-    setMessages((prev) => [...prev, newMessage]);
-    setMessage("");
+      // 저장 성공 후 입력창 비우기
+      setMessage("");
 
-    /*
-     * TODO: API 연동 위치
-     *
-     * POST /api/v1/interviews/{interview_id}/messages
-     *
-     * Response:
-     * - new_knowledge_units
-     * - new_gaps
-     * - conflicts
-     * - next_question
-     *
-     * 응답값으로 중앙 AI 질문과 우측 Live Insight 갱신
-     */
+      // Backend 기준 최신 메시지 이력 재조회
+      await fetchMessages();
+    } catch (error) {
+      console.error("INTERVIEW MESSAGE SEND ERROR:", error);
+
+      setMessageError(
+        error instanceof Error
+          ? error.message
+          : "메시지 전송 중 오류가 발생했습니다."
+      );
+    } finally {
+      setIsSending(false);
+    }
   };
 
   // 인터뷰 종료
+  // 현재 종료 API Contract가 없으므로 실제 요청은 하지 않음
   const handleEndInterview = () => {
     console.log("INTERVIEW END");
   };
@@ -275,6 +311,10 @@ export default function InterviewPage() {
                 );
               })}
             </div>
+
+            <p className="mt-4 text-center text-[10px] font-semibold text-slate-400">
+              Coverage API 연동 전 예시 데이터
+            </p>
           </aside>
 
           {/* 중앙: AI ↔ Expert 대화 */}
@@ -296,71 +336,128 @@ export default function InterviewPage() {
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-5">
-              {messages.map((item) => {
-                const isAI = item.speaker === "AI";
+              {messagesLoading ? (
+                <div className="flex h-full min-h-[300px] items-center justify-center">
+                  <p className="text-sm font-semibold text-slate-400">
+                    인터뷰 대화를 불러오는 중입니다.
+                  </p>
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex h-full min-h-[300px] items-center justify-center">
+                  <div className="text-center">
+                    <MessageSquareText className="mx-auto h-8 w-8 text-slate-300" />
 
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex gap-3 ${
-                      isAI ? "justify-start" : "justify-end"
-                    }`}
-                  >
-                    {isAI && (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-                        <Bot className="h-5 w-5" />
+                    <p className="mt-3 text-sm font-bold text-slate-500">
+                      아직 저장된 대화가 없습니다.
+                    </p>
+
+                    <p className="mt-1 text-xs font-medium text-slate-400">
+                      전문가 답변을 입력하면 인터뷰가 시작됩니다.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                messages.map((item) => {
+                  const isAI = item.role === "ASSISTANT";
+                  const isExpert = item.role === "USER";
+                  const isSystem = item.role === "SYSTEM";
+
+                  if (isSystem) {
+                    return (
+                      <div
+                        key={item.message_id}
+                        className="flex justify-center"
+                      >
+                        <div className="max-w-[85%] rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-center">
+                          <p className="text-[11px] font-bold text-slate-400">
+                            System · {formatMessageTime(item.created_at)}
+                          </p>
+
+                          <p className="mt-1 whitespace-pre-wrap break-words text-xs font-medium text-slate-600">
+                            {item.content}
+                          </p>
+                        </div>
                       </div>
-                    )}
+                    );
+                  }
 
+                  return (
                     <div
-                      className={`max-w-[78%] ${
-                        isAI ? "text-left" : "text-right"
+                      key={item.message_id}
+                      className={`flex gap-3 ${
+                        isAI ? "justify-start" : "justify-end"
                       }`}
                     >
-                      <div className="mb-1 flex items-center gap-2">
-                        {!isAI && <div className="flex-1" />}
+                      {isAI && (
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                          <Bot className="h-5 w-5" />
+                        </div>
+                      )}
 
-                        <span className="text-[11px] font-bold text-slate-400">
-                          {isAI ? "K-DNA AI" : "Expert"} · {item.time}
-                        </span>
-                      </div>
                       <div
-                        className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-sm font-medium leading-6 shadow-sm ${
-                          isAI
-                            ? "rounded-tl-md border border-slate-200 bg-white text-slate-700"
-                            : "rounded-tr-md bg-slate-900 text-white"
+                        className={`max-w-[78%] ${
+                          isAI ? "text-left" : "text-right"
                         }`}
                       >
-                        {item.content}
-                      </div>
-                    </div>
+                        <div className="mb-1 flex items-center gap-2">
+                          {!isAI && <div className="flex-1" />}
 
-                    {!isAI && (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
-                        <UserRound className="h-5 w-5" />
+                          <span className="text-[11px] font-bold text-slate-400">
+                            {isAI ? "K-DNA AI" : "Expert"} ·{" "}
+                            {formatMessageTime(item.created_at)}
+                          </span>
+                        </div>
+
+                        <div
+                          className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-left text-sm font-medium leading-6 shadow-sm ${
+                            isAI
+                              ? "rounded-tl-md border border-slate-200 bg-white text-slate-700"
+                              : "rounded-tr-md bg-slate-900 text-white"
+                          }`}
+                        >
+                          {item.content}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                      {isExpert && (
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
+                          <UserRound className="h-5 w-5" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             <form
               onSubmit={handleSubmit}
               className="border-t border-slate-200 bg-white p-4"
             >
+              {messageError && (
+                <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
+                  {messageError}
+                </p>
+              )}
+
               <div className="flex items-end gap-2">
                 <textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="전문가 답변을 입력하세요."
                   rows={1}
-                  className="min-h-[48px] flex-1 resize-none rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                  disabled={isSending || !interviewId}
+                  className="min-h-[48px] flex-1 resize-none rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                 />
 
                 <button
                   type="submit"
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700"
+                  disabled={
+                    isSending ||
+                    !interviewId ||
+                    message.trim().length === 0
+                  }
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                   aria-label="답변 전송"
                 >
                   <ArrowUp className="h-5 w-5" />
@@ -380,7 +477,7 @@ export default function InterviewPage() {
 
           {/* 우측: Live Insight */}
           <aside className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-5 flex items-center gap-2">
+            <div className="mb-3 flex items-center gap-2">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100">
                 <Lightbulb className="h-5 w-5 text-amber-600" />
               </div>
@@ -394,6 +491,12 @@ export default function InterviewPage() {
                   Live Insight
                 </p>
               </div>
+            </div>
+
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-slate-500">
+                AI `/turns` 연동 전 예시 데이터입니다.
+              </p>
             </div>
 
             <div className="space-y-3">
