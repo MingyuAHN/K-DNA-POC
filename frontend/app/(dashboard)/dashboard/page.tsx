@@ -65,11 +65,11 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-8">
-      <div className="mx-auto max-w-[1600px] space-y-6 lg:space-y-8">
+    <div className="bg-[#F8FAFC] px-3 pb-2 pt-1 text-slate-900 sm:px-4 lg:px-5">
+      <div className="mx-auto max-w-[1600px] space-y-3">
         {/* Dashboard 화면 제목 */}
         <header className="px-1">
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <h1 className="text-3xl font-black tracking-tighter text-slate-900 sm:text-4xl lg:text-5xl">
               Dashboard
             </h1>
@@ -81,8 +81,8 @@ export default function DashboardPage() {
         </header>
 
         {/* 전체 시스템 KPI */}
-        <section>
-          <div className="mb-4 flex items-center gap-2 px-1">
+        <section className="space-y-3">
+          <div className="flex items-center gap-2 px-1">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
               <Target className="h-4 w-4 text-blue-600" />
             </div>
@@ -105,13 +105,13 @@ export default function DashboardPage() {
               return (
                 <div
                   key={item.label}
-                  className="group relative overflow-hidden rounded-[22px] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md sm:p-5"
+                  className="group relative overflow-hidden rounded-[22px] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
                 >
                   <div
                     className={`absolute left-0 top-0 h-full w-1.5 ${item.barColor}`}
                   />
 
-                  <div className="mb-5 flex items-center justify-between">
+                  <div className="mb-3 flex items-center justify-between">
                     <div
                       className={`flex h-10 w-10 items-center justify-center rounded-xl ${item.iconBg}`}
                     >
@@ -139,7 +139,7 @@ export default function DashboardPage() {
         </section>
 
         {/* 진행 중인 Mission */}
-        <section className="space-y-4">
+        <section className="space-y-3">
           <div className="flex items-center gap-2 px-1">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100">
               <Target className="h-4 w-4 text-indigo-600" />
@@ -159,9 +159,9 @@ export default function DashboardPage() {
           {/* Active Mission 카드 */}
           <Link
             href="/interview"
-            className="group block rounded-[26px] border border-slate-200/70 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md sm:p-6 lg:p-7"
+            className="group block rounded-[26px] border border-slate-200/70 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
           >
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 items-start gap-4">
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600">
@@ -179,11 +179,10 @@ export default function DashboardPage() {
 
                     <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-500">
                       <UserRound className="h-4 w-4 text-slate-400" />
-
                       <span>{dashboardData.activeMission.expertRole}</span>
                     </div>
 
-                    <p className="mt-3 max-w-[760px] text-sm font-medium leading-6 text-slate-500">
+                    <p className="mt-2 max-w-[760px] text-sm font-medium leading-6 text-slate-500">
                       {dashboardData.activeMission.description}
                     </p>
                   </div>
@@ -196,8 +195,8 @@ export default function DashboardPage() {
               </div>
 
               {/* Knowledge Coverage */}
-              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-                <div className="mb-3 flex items-center justify-between">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="mb-2 flex items-center justify-between">
                   <div>
                     <p className="text-sm font-extrabold text-slate-800">
                       Knowledge Coverage
@@ -213,7 +212,7 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500"
                     style={{

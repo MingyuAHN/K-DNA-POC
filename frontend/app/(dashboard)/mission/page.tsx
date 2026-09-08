@@ -98,19 +98,19 @@ export default function MissionPage() {
 
   // 일반 입력창 공통 스타일
   const inputClass =
-    "h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
+    "h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
   // 아이콘 포함 입력창 공통 스타일
   const iconInputClass =
-    "h-12 w-full rounded-xl border border-slate-300 bg-white pl-12 pr-10 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
+    "h-11 w-full rounded-xl border border-slate-300 bg-white pl-12 pr-10 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
   const labelClass = "text-sm font-bold text-slate-800";
 
   return (
-    <div className="min-h-full">
-      <div className="mx-auto max-w-[1180px] space-y-5 pb-8">
+    <div>
+      <div className="mx-auto max-w-[1180px] space-y-3 pb-3">
         {/* 화면 설명 */}
-        <section className="px-1 pt-1">
+        <section className="px-1">
           <p className="text-sm font-medium text-slate-500">
             전문가의 경험을 체계적으로 수집하기 위한 미션을 설정하세요.
           </p>
@@ -119,15 +119,15 @@ export default function MissionPage() {
         {/* Mission 전체 입력 폼 */}
         <form
           onSubmit={handleSubmit}
-          className="relative overflow-hidden rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm lg:p-8"
+          className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6"
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-400/40 to-transparent" />
 
           <div className="pointer-events-none absolute -right-28 -top-28 h-64 w-64 rounded-full bg-blue-100/50 blur-3xl" />
 
-          <div className="relative space-y-6">
+          <div className="relative space-y-4">
             {/* Mission 이름 */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className={labelClass}>
                 미션 이름 <span className="text-rose-500">*</span>
               </label>
@@ -150,7 +150,7 @@ export default function MissionPage() {
             </div>
 
             {/* Mission 도메인 */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className={labelClass}>
                 도메인 <span className="text-rose-500">*</span>
               </label>
@@ -178,7 +178,7 @@ export default function MissionPage() {
             </div>
 
             {/* Mission 목표 */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className={labelClass}>
                 목표 <span className="text-rose-500">*</span>
               </label>
@@ -188,7 +188,7 @@ export default function MissionPage() {
                 onChange={(e) => setObjective(e.target.value)}
                 maxLength={200}
                 placeholder="예: MSA 환경에서 서비스 분리 판단 기준과 예외 규칙을 추출"
-                className="min-h-[108px] w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                className="min-h-[82px] w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                 required
               />
 
@@ -202,21 +202,21 @@ export default function MissionPage() {
             <div className="border-t border-slate-200" />
 
             {/* Expert 정보 */}
-            <section className="space-y-4">
+            <section className="space-y-3">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">
                   전문가 정보
                 </h2>
 
-                <p className="mt-1 text-xs font-medium text-slate-500">
+                <p className="mt-0.5 text-xs font-medium text-slate-500">
                   인터뷰와 Knowledge Validation에 사용할 전문가 정보를
                   등록합니다.
                 </p>
               </div>
 
-              <div className="grid gap-5 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-3">
                 {/* 전문가 역할 */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className={labelClass}>
                     전문가 역할 <span className="text-rose-500">*</span>
                   </label>
@@ -236,7 +236,7 @@ export default function MissionPage() {
                 </div>
 
                 {/* 전문가 경력 */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className={labelClass}>
                     경력 <span className="text-rose-500">*</span>
                   </label>
@@ -261,7 +261,7 @@ export default function MissionPage() {
                 </div>
 
                 {/* 전문가 전문 분야 */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className={labelClass}>
                     전문 분야 <span className="text-rose-500">*</span>
                   </label>
@@ -289,14 +289,14 @@ export default function MissionPage() {
             <div className="border-t border-slate-200" />
 
             {/* Mission Seed 문서 */}
-            <section className="space-y-4">
+            <section className="space-y-3">
               <div>
                 <h2 className="text-sm font-bold text-slate-800">
                   참고 문서 / Seed 문서{" "}
                   <span className="text-rose-500">*</span>
                 </h2>
 
-                <p className="mt-1 text-xs font-medium text-slate-500">
+                <p className="mt-0.5 text-xs font-medium text-slate-500">
                   전문가 답변과 비교할 Baseline Evidence 문서를 업로드합니다.
                 </p>
               </div>
@@ -315,9 +315,9 @@ export default function MissionPage() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="group flex min-h-[104px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-5 transition hover:border-blue-400 hover:bg-blue-50"
+                className="group flex min-h-[80px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-3 transition hover:border-blue-400 hover:bg-blue-50"
               >
-                <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600 transition group-hover:-translate-y-0.5">
+                <div className="mb-1 flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-600 transition group-hover:-translate-y-0.5">
                   <UploadCloud className="h-5 w-5" />
                 </div>
 
@@ -325,21 +325,21 @@ export default function MissionPage() {
                   문서 업로드
                 </span>
 
-                <span className="mt-1 text-[11px] font-medium text-slate-500">
+                <span className="mt-0.5 text-[11px] font-medium text-slate-500">
                   PDF, DOC, DOCX, TXT, MD
                 </span>
               </button>
 
               {/* 선택한 Seed 문서 목록 */}
               {files.length > 0 && (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   {files.map((file, index) => (
                     <div
                       key={`${file.name}-${index}`}
-                      className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm"
+                      className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
                     >
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
-                        <FileText className="h-5 w-5" />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                        <FileText className="h-4 w-4" />
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -347,7 +347,7 @@ export default function MissionPage() {
                           {file.name}
                         </p>
 
-                        <p className="mt-1 text-[11px] font-medium text-slate-500">
+                        <p className="mt-0.5 text-[11px] font-medium text-slate-500">
                           {(file.size / 1024 / 1024).toFixed(2)} MB
                         </p>
                       </div>
@@ -368,18 +368,18 @@ export default function MissionPage() {
             </section>
 
             {/* 하단 액션 */}
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={handleCancel}
-                className="h-12 min-w-[110px] rounded-xl border border-slate-300 bg-white px-6 text-sm font-bold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50"
+                className="h-11 min-w-[110px] rounded-xl border border-slate-300 bg-white px-6 text-sm font-bold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50"
               >
                 취소
               </button>
 
               <button
                 type="submit"
-                className="h-12 min-w-[150px] rounded-xl bg-blue-600 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
+                className="h-11 min-w-[150px] rounded-xl bg-blue-600 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
               >
                 미션 생성 →
               </button>
