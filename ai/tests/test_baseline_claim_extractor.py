@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 from shared.schemas.seed import (
-    SeedChunkInput,
     BaselineClaimExtractionRequest,
 )
 
@@ -12,11 +11,6 @@ from ai.agents.baseline_claim_extractor import (
 
 
 class StubLLMGateway:
-    """
-    실제 LLM API를 호출하지 않고
-    미리 정의한 결과를 반환하는 테스트용 Gateway.
-    """
-
     def generate_structured(
         self,
         system_prompt,
@@ -24,31 +18,33 @@ class StubLLMGateway:
         response_model,
     ):
         mock_result = {
+            "chunk_id": "temporary-chunk-id",
             "claims": [
                 {
                     "statement": (
                         "Migration Phase 1에서는 "
-                        "Order와 Inventory가 Shared Physical Database를 "
-                        "사용할 수 있다."
+                        "Shared Physical Database를 사용한다."
                     ),
-                    "type": "EXCEPTION",
+                    "claim_type": "FACT",
                     "context": {
                         "project": "Project Alpha",
                         "phase": "Migration Phase 1",
                         "domain": "Data Ownership"
                     },
-                    "source_chunk_id": "temporary",
+                    "source_chunk_id": "temporary-chunk-id",
                     "source_text": (
                         "Migration Phase 1에서는 Order와 Inventory가 "
                         "Shared Physical Database를 사용하고 "
                         "Schema 수준에서 Logical Separation을 적용한다."
                     ),
-                    "confidence": 0.95
+                    "confidence_score": 0.95
                 }
             ]
         }
 
-        return response_model.model_validate(mock_result)
+        return response_model.model_validate(
+            mock_result
+        )
 
 
 def test_baseline_claim_extractor():
@@ -60,27 +56,72 @@ def test_baseline_claim_extractor():
     )
 
     data = json.loads(
-        fixture_path.read_text(encoding="utf-8")
+        fixture_path.read_text(
+            encoding="utf-8"
+        )
     )
 
-    chunk = SeedChunkInput.model_validate(data)
-
-    request = BaselineClaimExtractionRequest(
-        chunk=chunk
+    # Backend → AI 최종 Request Schema
+    #
+    # {
+    #   "chunk_id": "...",
+    #   "content": "...",
+    #   "source": "...",
+    #   "context": {...}
+    # }
+    request = BaselineClaimExtractionRequest.model_validate(
+        data
     )
 
     extractor = BaselineClaimExtractor(
         llm_gateway=StubLLMGateway()
     )
 
-    result = extractor.extract(request)
+    result = extractor.extract(
+        request
+    )
 
+    # Response 최상위 chunk_id 확인
+    assert (
+        result.chunk_id
+        == "chunk-adr021-001"
+    )
+
+    # Claim이 정상 생성됐는지 확인
     assert len(result.claims) == 1
 
     claim = result.claims[0]
 
-    assert claim.type.value == "EXCEPTION"
+    # 기존 type → claim_type
+    assert (
+        claim.claim_type.value
+        == "FACT"
+    )
 
-    assert claim.source_chunk_id == "chunk-adr021-001"
+    # LLM이 temporary ID를 반환해도
+    # Extractor가 실제 Request의 chunk_id로 보정해야 함
+    assert (
+        claim.source_chunk_id
+        == "chunk-adr021-001"
+    )
 
-    assert claim.confidence == 0.95
+    # 기존 confidence → confidence_score
+    assert (
+        claim.confidence_score
+        == 0.95
+    )
+
+    assert (
+        claim.context.phase
+        == "Migration Phase 1"
+    )
+
+    assert (
+        claim.context.domain
+        == "Data Ownership"
+    )
+
+    assert (
+        "Shared Physical Database"
+        in claim.source_text
+    )

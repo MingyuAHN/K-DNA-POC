@@ -8,9 +8,9 @@ from ai.services.prompt_loader import load_prompt
 
 
 class BaselineClaimExtractor:
+
     def __init__(self, llm_gateway: LLMGateway):
         self.llm = llm_gateway
-
         self.system_prompt = load_prompt(
             "baseline_claim_extractor.md"
         )
@@ -20,22 +20,20 @@ class BaselineClaimExtractor:
         request: BaselineClaimExtractionRequest,
     ) -> BaselineClaimExtractionResponse:
 
-        chunk = request.chunk
-
         user_prompt = f"""
 다음 Document Chunk에서 Atomic Baseline Claim을 추출하세요.
 
 chunk_id:
-{chunk.chunk_id}
+{request.chunk_id}
 
 source:
-{chunk.source}
+{request.source}
 
 context:
-{chunk.context.model_dump_json(indent=2)}
+{request.context.model_dump_json(indent=2)}
 
 content:
-{chunk.content}
+{request.content}
 """
 
         result = self.llm.generate_structured(
@@ -44,9 +42,10 @@ content:
             response_model=BaselineClaimExtractionResponse,
         )
 
-        # 추적용 ID는 LLM 판단에 맡기지 않고
-        # 시스템 입력값으로 강제한다.
+        # 시스템 관리 ID는 LLM 생성값을 신뢰하지 않고 입력값으로 보정
+        result.chunk_id = request.chunk_id
+
         for claim in result.claims:
-            claim.source_chunk_id = chunk.chunk_id
+            claim.source_chunk_id = request.chunk_id
 
         return result
