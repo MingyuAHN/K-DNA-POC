@@ -4,6 +4,15 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 
+from shared.schemas.synthesis import (
+    KnowledgeSynthesisRequest,
+    KnowledgeSynthesisResponse,
+)
+
+from ai.agents.knowledge_synthesizer import (
+    KnowledgeSynthesizer,
+)
+
 from shared.schemas.seed import (
     BaselineClaimExtractionRequest,
     BaselineClaimExtractionResponse,
@@ -150,6 +159,38 @@ def analyze_interview(
         orchestrator = get_interview_orchestrator()
 
         return orchestrator.analyze(
+            request
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@lru_cache
+def get_knowledge_synthesizer():
+    gateway = OpenAIGateway()
+
+    return KnowledgeSynthesizer(
+        llm_gateway=gateway
+    )
+
+
+@app.post(
+    "/api/v1/ai/knowledge/synthesize",
+    response_model=KnowledgeSynthesisResponse,
+)
+def synthesize_knowledge(
+    request: KnowledgeSynthesisRequest,
+):
+    try:
+        synthesizer = (
+            get_knowledge_synthesizer()
+        )
+
+        return synthesizer.synthesize(
             request
         )
 

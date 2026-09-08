@@ -82,3 +82,12 @@ class RelationType(str, Enum):
 class RelationTargetType(str, Enum):
     KNOWLEDGE = "KNOWLEDGE"
     EVIDENCE = "EVIDENCE"
+
+
+class SynthesisOperation(str, Enum):
+    ENRICH = "ENRICH"
+    ADD_EXCEPTION = "ADD_EXCEPTION"
+    SPLIT_BY_CONTEXT = "SPLIT_BY_CONTEXT"
+    MERGE = "MERGE"
+    SUPERSEDE = "SUPERSEDE"
+    KEEP_CONFLICT = "KEEP_CONFLICT"
