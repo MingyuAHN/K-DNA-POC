@@ -109,3 +109,14 @@ def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Document upload failed: {str(exc)}",
         )
+
+def get_document(
+    db: Session,
+    document_id: uuid.UUID,
+) -> Document | None:
+
+    return (
+        db.query(Document)
+        .filter(Document.document_id == document_id)
+        .first()
+    )

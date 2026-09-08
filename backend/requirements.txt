@@ -5,3 +5,7 @@ psycopg[binary]
 pydantic-settings
 python-multipart
 supabase
+pymupdf
+python-docx
+httpx
+pgvector
