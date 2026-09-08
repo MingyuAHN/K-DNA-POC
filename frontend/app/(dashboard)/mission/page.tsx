@@ -1,30 +1,34 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
   BriefcaseBusiness,
   CalendarDays,
   ChevronDown,
   FileText,
+  Tags,
   UploadCloud,
   UserRound,
   X,
 } from "lucide-react";
+import { missionMock } from "@/mocks/missionMock";
 
 export default function MissionPage() {
   // Seed 문서 업로드 input 제어
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Mission 기본 정보
+  const router = useRouter();
+
+  // Mission 사용자 입력 정보
   const [missionName, setMissionName] = useState("");
   const [domain, setDomain] = useState("");
-  const [project, setProject] = useState("");
   const [objective, setObjective] = useState("");
 
-  // 전문가 정보
-  const [expertName, setExpertName] = useState("");
+  // Expert 사용자 입력 정보
   const [expertRole, setExpertRole] = useState("");
   const [experience, setExperience] = useState("");
+  const [specialties, setSpecialties] = useState("");
 
   // 업로드할 Seed 문서 목록
   const [files, setFiles] = useState<File[]>([]);
@@ -50,43 +54,53 @@ export default function MissionPage() {
   const handleCancel = () => {
     setMissionName("");
     setDomain("");
-    setProject("");
     setObjective("");
-    setExpertName("");
     setExpertRole("");
     setExperience("");
+    setSpecialties("");
     setFiles([]);
   };
 
-  // 미션 생성 버튼: 추후 Mission 생성 API 연동 위치
+  // 미션 생성 버튼: 추후 Backend API 연동 위치
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
 
-    // Mission API에 전달할 화면 입력값
-    const payload = {
-      missionName,
+    // Mission 생성 API 입력값
+    const missionPayload = {
+      title: missionName,
       domain,
-      project,
       objective,
-      expertName,
-      expertRole,
-      experience,
-      files,
     };
 
-    console.log("MISSION PAYLOAD:", payload);
+    // Expert 등록 API 입력값
+    const expertPayload = {
+      role: expertRole,
+      experience_years: Number(experience),
+      specialties: specialties
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    };
 
-    // TODO: 민규 API 스펙 확정 후 연결
-    // 1. Mission 생성 API 호출
-    // 2. 생성된 mission_id 응답 수신
-    // 3. mission_id 기준으로 Seed 문서 업로드
+    // 임시 화면 흐름 확인용
+    router.push("/interview");
+
+    console.log("MISSION PAYLOAD:", missionPayload);
+    console.log("EXPERT PAYLOAD:", expertPayload);
+    console.log("SEED FILES:", files);
+
+    // TODO: API 스펙 확정 후 연결
+    // 1. Mission 생성 → mission_id 수신
+    // 2. Expert 등록 → expert_id 수신
+    // 3. mission_id 기준 Seed 문서 업로드
+    // 4. 필요 시 Interview 생성 후 이동
   };
 
   // 일반 입력창 공통 스타일
   const inputClass =
     "h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
-  // 아이콘이 포함된 입력창 공통 스타일
+  // 아이콘 포함 입력창 공통 스타일
   const iconInputClass =
     "h-12 w-full rounded-xl border border-slate-300 bg-white pl-12 pr-10 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
@@ -112,7 +126,7 @@ export default function MissionPage() {
           <div className="pointer-events-none absolute -right-28 -top-28 h-64 w-64 rounded-full bg-blue-100/50 blur-3xl" />
 
           <div className="relative space-y-6">
-            {/* Mission 이름 입력 */}
+            {/* Mission 이름 */}
             <div className="space-y-2">
               <label className={labelClass}>
                 미션 이름 <span className="text-rose-500">*</span>
@@ -135,64 +149,35 @@ export default function MissionPage() {
               </div>
             </div>
 
-            {/* Mission 도메인 / 프로젝트 선택 */}
-            <div className="grid gap-5 md:grid-cols-2">
-              {/* 도메인 */}
-              <div className="space-y-2">
-                <label className={labelClass}>
-                  도메인 <span className="text-rose-500">*</span>
-                </label>
+            {/* Mission 도메인 */}
+            <div className="space-y-2">
+              <label className={labelClass}>
+                도메인 <span className="text-rose-500">*</span>
+              </label>
 
-                <div className="relative">
-                  <BriefcaseBusiness className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
+              <div className="relative">
+                <BriefcaseBusiness className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
 
-                  <select
-                    value={domain}
-                    onChange={(e) => setDomain(e.target.value)}
-                    className={`${iconInputClass} appearance-none`}
-                    required
-                  >
-                    <option value="">도메인을 선택하세요</option>
-                    <option value="MSA Architecture">
-                      MSA Architecture
+                <select
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  className={`${iconInputClass} appearance-none`}
+                  required
+                >
+                  <option value="">도메인을 선택하세요</option>
+
+                  {missionMock.domains.map((domainItem) => (
+                    <option key={domainItem} value={domainItem}>
+                      {domainItem}
                     </option>
-                    <option value="Application Architecture">
-                      Application Architecture
-                    </option>
-                    <option value="Enterprise Architecture">
-                      Enterprise Architecture
-                    </option>
-                  </select>
+                  ))}
+                </select>
 
-                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                </div>
-              </div>
-
-              {/* 프로젝트 */}
-              <div className="space-y-2">
-                <label className={labelClass}>
-                  프로젝트 <span className="text-rose-500">*</span>
-                </label>
-
-                <div className="relative">
-                  <CalendarDays className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
-
-                  <select
-                    value={project}
-                    onChange={(e) => setProject(e.target.value)}
-                    className={`${iconInputClass} appearance-none`}
-                    required
-                  >
-                    <option value="">프로젝트를 선택하세요</option>
-                    <option value="Project Alpha">Project Alpha</option>
-                  </select>
-
-                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                </div>
+                <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               </div>
             </div>
 
-            {/* Mission 목표 입력 */}
+            {/* Mission 목표 */}
             <div className="space-y-2">
               <label className={labelClass}>
                 목표 <span className="text-rose-500">*</span>
@@ -216,7 +201,7 @@ export default function MissionPage() {
 
             <div className="border-t border-slate-200" />
 
-            {/* Mission에 연결할 전문가 정보 */}
+            {/* Expert 정보 */}
             <section className="space-y-4">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">
@@ -224,31 +209,12 @@ export default function MissionPage() {
                 </h2>
 
                 <p className="mt-1 text-xs font-medium text-slate-500">
-                  인터뷰와 Knowledge Validation의 출처 정보로 사용됩니다.
+                  인터뷰와 Knowledge Validation에 사용할 전문가 정보를
+                  등록합니다.
                 </p>
               </div>
 
               <div className="grid gap-5 lg:grid-cols-3">
-                {/* 전문가 이름 */}
-                <div className="space-y-2">
-                  <label className={labelClass}>
-                    전문가 이름 <span className="text-rose-500">*</span>
-                  </label>
-
-                  <div className="relative">
-                    <UserRound className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
-
-                    <input
-                      type="text"
-                      value={expertName}
-                      onChange={(e) => setExpertName(e.target.value)}
-                      placeholder="예: 이수빈"
-                      className={iconInputClass}
-                      required
-                    />
-                  </div>
-                </div>
-
                 {/* 전문가 역할 */}
                 <div className="space-y-2">
                   <label className={labelClass}>
@@ -283,7 +249,7 @@ export default function MissionPage() {
                       min={0}
                       value={experience}
                       onChange={(e) => setExperience(e.target.value)}
-                      placeholder="18"
+                      placeholder="15"
                       className={`${iconInputClass} pr-12`}
                       required
                     />
@@ -293,12 +259,36 @@ export default function MissionPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* 전문가 전문 분야 */}
+                <div className="space-y-2">
+                  <label className={labelClass}>
+                    전문 분야 <span className="text-rose-500">*</span>
+                  </label>
+
+                  <div className="relative">
+                    <Tags className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
+
+                    <input
+                      type="text"
+                      value={specialties}
+                      onChange={(e) => setSpecialties(e.target.value)}
+                      placeholder="예: DDD, Data Ownership, Transaction"
+                      className={iconInputClass}
+                      required
+                    />
+                  </div>
+
+                  <p className="text-[11px] font-medium text-slate-400">
+                    여러 분야는 쉼표(,)로 구분합니다.
+                  </p>
+                </div>
               </div>
             </section>
 
             <div className="border-t border-slate-200" />
 
-            {/* Mission에 연결할 Seed 문서 */}
+            {/* Mission Seed 문서 */}
             <section className="space-y-4">
               <div>
                 <h2 className="text-sm font-bold text-slate-800">
@@ -321,7 +311,7 @@ export default function MissionPage() {
                 onChange={handleFileChange}
               />
 
-              {/* 문서 업로드 버튼 */}
+              {/* 문서 선택 버튼 */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -362,7 +352,7 @@ export default function MissionPage() {
                         </p>
                       </div>
 
-                      {/* 선택한 문서 삭제 버튼 */}
+                      {/* 선택한 문서 삭제 */}
                       <button
                         type="button"
                         onClick={() => handleRemoveFile(index)}
@@ -377,9 +367,8 @@ export default function MissionPage() {
               )}
             </section>
 
-            {/* 하단 액션 버튼 */}
+            {/* 하단 액션 */}
             <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:justify-end">
-              {/* 취소 버튼: 입력값 초기화 */}
               <button
                 type="button"
                 onClick={handleCancel}
@@ -388,7 +377,6 @@ export default function MissionPage() {
                 취소
               </button>
 
-              {/* 미션 생성 버튼: Mission 생성 API 호출 */}
               <button
                 type="submit"
                 className="h-12 min-w-[150px] rounded-xl bg-blue-600 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
