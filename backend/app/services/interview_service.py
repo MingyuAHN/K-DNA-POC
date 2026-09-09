@@ -73,11 +73,8 @@ def complete_interview(
     interview_id: uuid.UUID,
 ) -> Interview:
     """
-    인터뷰를 정상 종료한다.
-
-    - CREATED / IN_PROGRESS -> COMPLETED
-    - 이미 COMPLETED면 그대로 반환
-    - CANCELLED는 완료 처리할 수 없음
+    사용자가 인터뷰 종료 버튼을 눌렀을 때
+    Interview를 COMPLETED 상태로 변경한다.
     """
 
     interview = get_interview(
@@ -112,35 +109,6 @@ def complete_interview(
     db.refresh(interview)
 
     return interview
-
-
-def count_interview_messages_by_role(
-    db: Session,
-    interview_id: uuid.UUID,
-    role: str,
-) -> int:
-    """
-    특정 Interview에서 USER / ASSISTANT / SYSTEM
-    메시지 개수를 반환한다.
-
-    후속 질문 수 제한 등에 사용한다.
-    """
-
-    return (
-        db.query(
-            func.count(
-                InterviewMessage.message_id
-            )
-        )
-        .filter(
-            InterviewMessage.interview_id
-            == interview_id,
-            InterviewMessage.role
-            == role.upper(),
-        )
-        .scalar()
-        or 0
-    )
 
 
 def add_interview_message(
