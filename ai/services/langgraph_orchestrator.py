@@ -27,33 +27,10 @@ from ai.services.result_postprocessor import (
 
 
 # ---------------------------------------------------------
-# Interview termination policy
+# Question quality policy
 # ---------------------------------------------------------
 
-MIN_NOVELTY_SCORE = 0.20
 QUESTION_SIMILARITY_THRESHOLD = 0.82
-
-
-def _get_question_threshold(
-    previous_ai_question_count: int,
-) -> float:
-    """
-    인터뷰가 진행될수록 더 높은 가치의 질문만 허용한다.
-    """
-
-    if previous_ai_question_count >= 4:
-        return 0.90
-
-    if previous_ai_question_count >= 3:
-        return 0.85
-
-    if previous_ai_question_count >= 2:
-        return 0.80
-
-    if previous_ai_question_count >= 1:
-        return 0.65
-
-    return 0.60
 
 
 class KDNAState(TypedDict, total=False):
@@ -377,9 +354,10 @@ class LangGraphAIOrchestrator:
             [],
         )
 
+        # Knowledge Candidate가 전혀 없는 예외 상황
         if not candidates:
             print(
-                "[INTERVIEW-END] "
+                "[QUESTION] "
                 "no knowledge candidates"
             )
 
@@ -389,67 +367,20 @@ class LangGraphAIOrchestrator:
             }
 
         # -----------------------------------------------------
-        # 1. Novelty 기반 종료
+        # 1. 높은 Gap Score 순으로 정렬
         # -----------------------------------------------------
 
-        max_novelty = max(
-            (
-                candidate.novelty_score
-                for candidate in candidates
+        ranked_gaps = sorted(
+            state.get(
+                "reduced_gaps",
+                [],
             ),
-            default=0.0,
-        )
-
-        if max_novelty < MIN_NOVELTY_SCORE:
-            print(
-                "[INTERVIEW-END] "
-                f"low novelty: "
-                f"{max_novelty:.2f}"
-            )
-
-            return {
-                "question_candidates": [],
-                "next_question": None,
-            }
-
-        # -----------------------------------------------------
-        # 2. 기존 AI 질문 수집
-        # -----------------------------------------------------
-
-        previous_ai_questions = []
-
-        for message in request.conversation_context:
-            speaker = getattr(
-                message.speaker,
-                "value",
-                message.speaker,
-            )
-
-            if str(speaker).upper() == "AI":
-                previous_ai_questions.append(
-                    message.content
-                )
-
-        # -----------------------------------------------------
-        # 3. 턴 진행도에 따른 동적 Threshold
-        # -----------------------------------------------------
-
-        question_threshold = (
-            _get_question_threshold(
-                len(previous_ai_questions)
-            )
-        )
-
-        print(
-            "[QUESTION-THRESHOLD] "
-            f"previous_ai_questions="
-            f"{len(previous_ai_questions)}, "
-            f"threshold="
-            f"{question_threshold:.2f}"
+            key=lambda gap: gap.gap_score,
+            reverse=True,
         )
 
         # -----------------------------------------------------
-        # 4. 대표 Knowledge Candidate 선택
+        # 2. 가장 중요한 Knowledge Candidate 선택
         # -----------------------------------------------------
 
         primary_candidate = max(
@@ -463,10 +394,7 @@ class LangGraphAIOrchestrator:
         question_request = QuestionPlanningRequest(
             candidate=primary_candidate,
             mission=request.mission,
-            gaps=state.get(
-                "reduced_gaps",
-                [],
-            ),
+            gaps=ranked_gaps,
             conflicts=state.get(
                 "reduced_conflicts",
                 [],
@@ -489,15 +417,17 @@ class LangGraphAIOrchestrator:
             f"{elapsed:.2f}s"
         )
 
-        # Top 3 + 질문 자체 중복 제거
+        # Question Candidate 내부 중복 제거 + Top 3
         questions = select_questions(
             result.question_candidates
         )
 
+        # Question Planner 자체가 질문을 생성하지 못한
+        # 예외적인 경우에만 null
         if not questions:
             print(
-                "[INTERVIEW-END] "
-                "no question candidates"
+                "[QUESTION] "
+                "no question candidates generated"
             )
 
             return {
@@ -506,29 +436,33 @@ class LangGraphAIOrchestrator:
             }
 
         # -----------------------------------------------------
-        # 5. Value Score + 기존 질문 반복 여부 필터
+        # 3. 이전 AI 질문 수집
         # -----------------------------------------------------
 
-        eligible_questions = []
+        previous_ai_questions = []
 
-        for question in questions:
+        for message in request.conversation_context:
+            speaker = getattr(
+                message.speaker,
+                "value",
+                message.speaker,
+            )
 
-            # 현재 턴 Threshold 미달
-            if (
-                question.value_score
-                < question_threshold
-            ):
-                print(
-                    "[QUESTION-SKIP] "
-                    f"low value_score="
-                    f"{question.value_score:.3f} "
-                    f"< threshold="
-                    f"{question_threshold:.2f}"
+            if str(speaker).upper() == "AI":
+                previous_ai_questions.append(
+                    message.content
                 )
 
-                continue
+        # -----------------------------------------------------
+        # 4. 이전 질문과 의미적으로 유사한 질문 제외
+        #
+        # 이 로직은 인터뷰 종료용이 아니라
+        # 반복 질문 방지용이다.
+        # -----------------------------------------------------
 
-            # 기존 AI 질문과 유사한 질문인지 확인
+        non_repeated_questions = []
+
+        for question in questions:
             repeated = any(
                 is_similar_text(
                     question.question,
@@ -550,61 +484,53 @@ class LangGraphAIOrchestrator:
 
                 continue
 
-            eligible_questions.append(
+            non_repeated_questions.append(
                 question
             )
 
         # -----------------------------------------------------
-        # 6. 유효 질문이 없으면 종료
+        # 5. 새로운 질문이 있으면 우선 사용
         # -----------------------------------------------------
 
-        if not eligible_questions:
-            best_score = max(
-                (
-                    question.value_score
-                    for question in questions
-                ),
-                default=0.0,
+        if non_repeated_questions:
+            final_questions = (
+                non_repeated_questions[:3]
             )
+
+        # -----------------------------------------------------
+        # 6. 모든 질문이 이전 질문과 유사하더라도
+        #    자동 종료하지 않는다.
+        #
+        # Question Planner가 반환한 질문 중
+        # 가장 가치가 높은 질문을 fallback으로 사용한다.
+        # -----------------------------------------------------
+
+        else:
+            final_questions = questions[:3]
 
             print(
-                "[INTERVIEW-END] "
-                "no valuable/non-repeated "
-                "question "
-                f"(best_score="
-                f"{best_score:.3f}, "
-                f"threshold="
-                f"{question_threshold:.2f})"
+                "[QUESTION-FALLBACK] "
+                "all candidates were similar; "
+                "using highest-value question"
             )
 
-            return {
-                "question_candidates": [],
-                "next_question": None,
-            }
-
         # -----------------------------------------------------
-        # 7. 최종 Top 3
+        # 7. 가장 가치 높은 질문을 next_question으로 선택
         # -----------------------------------------------------
 
-        eligible_questions = (
-            eligible_questions[:3]
-        )
-
-        next_question = (
-            eligible_questions[0]
-        )
+        next_question = final_questions[0]
 
         print(
             "[NEXT-QUESTION] "
             f"value_score="
             f"{next_question.value_score:.3f}, "
-            f"threshold="
-            f"{question_threshold:.2f}"
+            f"previous_ai_questions="
+            f"{len(previous_ai_questions)}"
         )
 
         return {
             "question_candidates":
-                eligible_questions,
+                final_questions,
             "next_question":
                 next_question,
         }
