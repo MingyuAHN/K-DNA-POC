@@ -17,6 +17,11 @@ export type MissionResponse = {
   updated_at: string;
 };
 
+export type MissionListResponse = {
+  total: number;
+  missions: MissionResponse[];
+};
+
 export type MissionDocumentResponse = {
   document_id: string;
   mission_id: string;
@@ -66,6 +71,24 @@ export async function createMission(
       await getErrorMessage(
         response,
         "미션 생성 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Mission 목록 조회
+export async function getMissions(): Promise<MissionListResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/missions`
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Mission 목록 조회에 실패했습니다."
       )
     );
   }

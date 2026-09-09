@@ -1,26 +1,37 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowRight,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
   ChevronDown,
+  Clock3,
   FileText,
+  Loader2,
+  RotateCcw,
   Tags,
   UploadCloud,
   UserRound,
   X,
 } from "lucide-react";
+
 import { missionMock } from "@/mocks/missionMock";
+
 import {
   createMission,
+  getMissions,
   uploadMissionDocument,
+  type MissionResponse,
 } from "@/services/mission";
+
 import {
   createExpert,
   createInterview,
+  getMissionInterviews,
+  type InterviewResponse,
 } from "@/services/interview";
 
 export default function MissionPage() {
@@ -29,7 +40,23 @@ export default function MissionPage() {
   // Seed 문서 업로드 input 제어
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Mission 사용자 입력 정보
+  // ============================================================
+  // 기존 Mission 목록
+  // ============================================================
+
+  const [missions, setMissions] = useState<MissionResponse[]>([]);
+  const [missionsLoading, setMissionsLoading] = useState(true);
+  const [missionsError, setMissionsError] = useState("");
+
+  // 어떤 Mission의 Interview를 조회 중인지 저장
+  const [openingMissionId, setOpeningMissionId] = useState<string | null>(
+    null
+  );
+
+  // ============================================================
+  // 신규 Mission 입력
+  // ============================================================
+
   const [missionName, setMissionName] = useState("");
   const [domain, setDomain] = useState("");
   const [objective, setObjective] = useState("");
@@ -49,43 +76,157 @@ export default function MissionPage() {
   const [submitError, setSubmitError] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
 
-  // 문서 선택 시 파일 목록에 추가
+  // ============================================================
+  // 기존 Mission 목록 조회
+  // ============================================================
+
+  const fetchMissions = async () => {
+    try {
+      setMissionsLoading(true);
+      setMissionsError("");
+
+      const data = await getMissions();
+
+      setMissions(data.missions);
+    } catch (error) {
+      console.error("MISSION LIST FETCH ERROR:", error);
+
+      setMissionsError(
+        error instanceof Error
+          ? error.message
+          : "Mission 목록을 불러오는 중 오류가 발생했습니다."
+      );
+    } finally {
+      setMissionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMissions();
+  }, []);
+
+  // ============================================================
+  // Mission 재진입
+  //
+  // 우선순위:
+  // 1. IN_PROGRESS
+  // 2. CREATED
+  // 3. 가장 최근 COMPLETED
+  //
+  // CANCELLED는 재진입 대상에서 제외
+  // ============================================================
+
+  const handleOpenMission = async (mission: MissionResponse) => {
+    if (openingMissionId) {
+      return;
+    }
+
+    try {
+      setOpeningMissionId(mission.mission_id);
+      setMissionsError("");
+
+      const data = await getMissionInterviews(mission.mission_id);
+
+      const sortedInterviews = [...data.interviews].sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() -
+          new Date(a.created_at).getTime()
+      );
+
+      const selectedInterview =
+        sortedInterviews.find(
+          (interview) => interview.status === "IN_PROGRESS"
+        ) ??
+        sortedInterviews.find(
+          (interview) => interview.status === "CREATED"
+        ) ??
+        sortedInterviews.find(
+          (interview) => interview.status === "COMPLETED"
+        ) ??
+        null;
+
+      if (!selectedInterview) {
+        setMissionsError(
+          `"${mission.title}" 미션에 재진입할 수 있는 Interview가 없습니다.`
+        );
+        return;
+      }
+
+      router.push(
+        `/interview?missionId=${encodeURIComponent(
+          mission.mission_id
+        )}&interviewId=${encodeURIComponent(
+          selectedInterview.interview_id
+        )}&interviewStatus=${encodeURIComponent(
+          selectedInterview.status
+        )}`
+      );
+    } catch (error) {
+      console.error("MISSION INTERVIEW OPEN ERROR:", error);
+
+      setMissionsError(
+        error instanceof Error
+          ? error.message
+          : "Mission의 Interview를 불러오는 중 오류가 발생했습니다."
+      );
+    } finally {
+      setOpeningMissionId(null);
+    }
+  };
+
+  // ============================================================
+  // 파일
+  // ============================================================
+
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const selectedFiles = Array.from(event.target.files ?? []);
 
-    if (selectedFiles.length === 0) return;
+    if (selectedFiles.length === 0) {
+      return;
+    }
 
     setFiles((prev) => [...prev, ...selectedFiles]);
+
     event.target.value = "";
   };
 
-  // 선택한 Seed 문서 삭제
   const handleRemoveFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // 취소 버튼: 입력값 전체 초기화
+  // ============================================================
+  // 신규 Mission 입력 초기화
+  // ============================================================
+
   const handleCancel = () => {
     setMissionName("");
     setDomain("");
     setObjective("");
+
     setExpertName("");
     setOrganization("");
     setExpertRole("");
     setExperience("");
     setSpecialties("");
+
     setFiles([]);
+
     setSubmitError("");
     setSubmitMessage("");
   };
 
+  // ============================================================
+  // Mission 생성
+  //
   // Mission 생성
   // → Seed 문서 업로드
   // → Expert 등록
   // → Interview 생성
   // → Interview 화면 이동
+  // ============================================================
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
@@ -98,14 +239,12 @@ export default function MissionPage() {
     setSubmitError("");
     setSubmitMessage("");
 
-    // Mission 생성 API 입력값
     const missionPayload = {
       title: missionName,
       domain,
       objective,
     };
 
-    // Expert 등록 API 입력값
     const expertPayload = {
       name: expertName,
       organization,
@@ -124,7 +263,7 @@ export default function MissionPage() {
       const createdMission = await createMission(missionPayload);
       const missionId = createdMission.mission_id;
 
-      // 2. 선택한 Seed 문서를 mission_id 기준으로 순차 업로드
+      // 2. Seed 문서 업로드
       for (const file of files) {
         await uploadMissionDocument(missionId, file);
       }
@@ -149,11 +288,16 @@ export default function MissionPage() {
         "미션, 전문가 및 인터뷰 생성이 완료되었습니다."
       );
 
-      // 생성된 Mission / Interview ID를 Interview 화면으로 전달
+      // 신규 생성된 Mission도 CREATED 상태 Interview이므로
+      // status까지 함께 전달
       router.push(
         `/interview?missionId=${encodeURIComponent(
           missionId
-        )}&interviewId=${encodeURIComponent(interviewId)}`
+        )}&interviewId=${encodeURIComponent(
+          interviewId
+        )}&interviewStatus=${encodeURIComponent(
+          createdInterview.status
+        )}`
       );
     } catch (error) {
       console.error("MISSION CREATE ERROR:", error);
@@ -168,19 +312,55 @@ export default function MissionPage() {
     }
   };
 
-  // 일반 입력창 공통 스타일
+  // ============================================================
+  // 표시용 함수
+  // ============================================================
+
+  const formatMissionDate = (createdAt: string) => {
+    const date = new Date(createdAt);
+
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+
+    return date.toLocaleDateString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  };
+
+  const getMissionStatusLabel = (status: string) => {
+    switch (status) {
+      case "CREATED":
+        return "생성됨";
+      case "IN_PROGRESS":
+        return "진행 중";
+      case "COMPLETED":
+        return "완료";
+      case "CANCELLED":
+        return "취소";
+      default:
+        return status;
+    }
+  };
+
+  // ============================================================
+  // 공통 스타일
+  // ============================================================
+
   const inputClass =
     "h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
-  // 아이콘 포함 입력창 공통 스타일
   const iconInputClass =
     "h-11 w-full rounded-xl border border-slate-300 bg-white pl-12 pr-10 text-sm font-medium text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
-  const labelClass = "text-sm font-bold text-slate-800";
+  const labelClass =
+    "text-sm font-bold text-slate-800";
 
   return (
     <div>
-      <div className="mx-auto max-w-[1180px] space-y-3 pb-3">
+      <div className="mx-auto max-w-[1180px] space-y-4 pb-3">
         {/* 화면 설명 */}
         <section className="px-1">
           <p className="text-sm font-medium text-slate-500">
@@ -188,7 +368,147 @@ export default function MissionPage() {
           </p>
         </section>
 
-        {/* Mission 전체 입력 폼 */}
+        {/* ====================================================
+            기존 Mission 목록
+        ==================================================== */}
+
+        <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900">
+                기존 미션
+              </h2>
+
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                이전에 생성한 미션을 선택하면 기존 인터뷰를 이어서 진행할
+                수 있습니다.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={fetchMissions}
+              disabled={missionsLoading || Boolean(openingMissionId)}
+              className="flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RotateCcw
+                className={`h-4 w-4 ${
+                  missionsLoading ? "animate-spin" : ""
+                }`}
+              />
+              새로고침
+            </button>
+          </div>
+
+          {missionsError && (
+            <div className="border-b border-rose-100 bg-rose-50 px-5 py-3">
+              <p className="text-sm font-semibold text-rose-600">
+                {missionsError}
+              </p>
+            </div>
+          )}
+
+          {missionsLoading ? (
+            <div className="flex min-h-[150px] items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+
+              <p className="text-sm font-semibold text-slate-400">
+                Mission 목록을 불러오는 중입니다.
+              </p>
+            </div>
+          ) : missions.length === 0 ? (
+            <div className="flex min-h-[150px] items-center justify-center">
+              <div className="text-center">
+                <BriefcaseBusiness className="mx-auto h-7 w-7 text-slate-300" />
+
+                <p className="mt-2 text-sm font-bold text-slate-500">
+                  생성된 Mission이 없습니다.
+                </p>
+
+                <p className="mt-1 text-xs font-medium text-slate-400">
+                  아래에서 새로운 Mission을 생성해주세요.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+              {missions.map((mission) => {
+                const isOpening =
+                  openingMissionId === mission.mission_id;
+
+                return (
+                  <button
+                    key={mission.mission_id}
+                    type="button"
+                    onClick={() => handleOpenMission(mission)}
+                    disabled={Boolean(openingMissionId)}
+                    className="group flex min-h-[150px] flex-col rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                        <BriefcaseBusiness className="h-5 w-5" />
+                      </div>
+
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500">
+                        {getMissionStatusLabel(mission.status)}
+                      </span>
+                    </div>
+
+                    <h3 className="mt-3 line-clamp-2 text-sm font-black leading-5 text-slate-900">
+                      {mission.title}
+                    </h3>
+
+                    <p className="mt-1 text-xs font-semibold text-blue-600">
+                      {mission.domain}
+                    </p>
+
+                    {mission.objective && (
+                      <p className="mt-2 line-clamp-2 text-xs font-medium leading-5 text-slate-500">
+                        {mission.objective}
+                      </p>
+                    )}
+
+                    <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        {formatMissionDate(mission.created_at)}
+                      </div>
+
+                      <div className="flex items-center gap-1 text-xs font-black text-blue-600">
+                        {isOpening ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            조회 중
+                          </>
+                        ) : (
+                          <>
+                            인터뷰 열기
+                            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* ====================================================
+            신규 Mission 생성
+        ==================================================== */}
+
+        <section className="px-1 pt-2">
+          <h2 className="text-base font-extrabold text-slate-900">
+            새 미션 생성
+          </h2>
+
+          <p className="mt-1 text-xs font-medium text-slate-500">
+            새로운 전문가 인터뷰를 시작하기 위한 Mission을 생성합니다.
+          </p>
+        </section>
+
         <form
           onSubmit={handleSubmit}
           className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm lg:p-6"
@@ -238,10 +558,15 @@ export default function MissionPage() {
                   required
                   disabled={isSubmitting}
                 >
-                  <option value="">도메인을 선택하세요</option>
+                  <option value="">
+                    도메인을 선택하세요
+                  </option>
 
                   {missionMock.domains.map((domainItem) => (
-                    <option key={domainItem} value={domainItem}>
+                    <option
+                      key={domainItem}
+                      value={domainItem}
+                    >
                       {domainItem}
                     </option>
                   ))}
@@ -424,7 +749,6 @@ export default function MissionPage() {
                 </p>
               </div>
 
-              {/* 실제 파일 선택 input */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -435,7 +759,6 @@ export default function MissionPage() {
                 disabled={isSubmitting}
               />
 
-              {/* 문서 선택 버튼 */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -455,7 +778,6 @@ export default function MissionPage() {
                 </span>
               </button>
 
-              {/* 선택한 Seed 문서 목록 */}
               {files.length > 0 && (
                 <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   {files.map((file, index) => (
@@ -477,7 +799,6 @@ export default function MissionPage() {
                         </p>
                       </div>
 
-                      {/* 선택한 문서 삭제 */}
                       <button
                         type="button"
                         onClick={() => handleRemoveFile(index)}
@@ -522,7 +843,9 @@ export default function MissionPage() {
                 disabled={isSubmitting}
                 className="h-11 min-w-[150px] rounded-xl bg-blue-600 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
               >
-                {isSubmitting ? "생성 중..." : "미션 생성 →"}
+                {isSubmitting
+                  ? "생성 중..."
+                  : "미션 생성 →"}
               </button>
             </div>
           </div>

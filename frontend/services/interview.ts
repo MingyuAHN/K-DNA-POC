@@ -46,6 +46,12 @@ export type InterviewResponse = {
   updated_at: string;
 };
 
+export type MissionInterviewListResponse = {
+  mission_id: string;
+  total: number;
+  interviews: InterviewResponse[];
+};
+
 export type InterviewMessageCreateRequest = {
   content: string;
 };
@@ -219,6 +225,26 @@ export async function createInterview(
       await getErrorMessage(
         response,
         "인터뷰 생성 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Mission별 Interview 목록 조회
+export async function getMissionInterviews(
+  missionId: string
+): Promise<MissionInterviewListResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/missions/${missionId}/interviews`
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Mission의 인터뷰 목록을 불러오는 중 오류가 발생했습니다."
       )
     );
   }
