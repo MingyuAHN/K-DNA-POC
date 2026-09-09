@@ -20,6 +20,7 @@ import {
 import { interviewMock } from "@/mocks/interviewMock";
 import { getMission, type MissionResponse } from "@/services/mission";
 import {
+  completeInterview,
   getInterviewMessages,
   processInterviewTurn,
   type InterviewMessage,
@@ -73,6 +74,11 @@ export default function InterviewPage() {
   const [messagesLoading, setMessagesLoading] = useState(true);
   const [messageError, setMessageError] = useState("");
   const [isSending, setIsSending] = useState(false);
+
+  // Interview 종료 상태
+  const [isInterviewCompleted, setIsInterviewCompleted] =
+    useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   // Coverage는 아직 실제 API 미연동 영역
   const coverageItems = interviewMock.coverageItems;
@@ -147,7 +153,12 @@ export default function InterviewPage() {
 
     const trimmedMessage = message.trim();
 
-    if (!trimmedMessage || isSending) {
+    if (
+      !trimmedMessage ||
+      isSending ||
+      isCompleting ||
+      isInterviewCompleted
+    ) {
       return;
     }
 
@@ -160,9 +171,12 @@ export default function InterviewPage() {
       setIsSending(true);
       setMessageError("");
 
-      // 변경:
-      // 기존 /messages 단순 저장 대신 /turns 호출
-      // Backend에서 USER 저장 → AI 분석 → ASSISTANT 저장까지 수행
+      // /turns 호출
+      // Backend에서:
+      // USER 저장
+      // → AI 분석
+      // → 필요 시 ASSISTANT 저장
+      // → 종료 조건 충족 시 Interview COMPLETED 처리
       const turnResult = await processInterviewTurn(interviewId, {
         content: trimmedMessage,
       });
@@ -173,16 +187,30 @@ export default function InterviewPage() {
       // 성공 후 입력창 초기화
       setMessage("");
 
+      // AI가 더 이상 후속 질문을 만들지 않았거나
+      // Backend 최대 후속 질문 수에 도달한 경우
+      // Backend에서 이미 COMPLETED 처리된 상태
+      if (turnResult.next_question === null) {
+        setIsInterviewCompleted(true);
+      }
+
       // USER + ASSISTANT 메시지를 Backend 기준으로 다시 조회
       await fetchMessages();
     } catch (error) {
       console.error("INTERVIEW TURN ERROR:", error);
 
-      setMessageError(
+      const errorMessage =
         error instanceof Error
           ? error.message
-          : "인터뷰 AI 처리 중 오류가 발생했습니다."
-      );
+          : "인터뷰 AI 처리 중 오류가 발생했습니다.";
+
+      setMessageError(errorMessage);
+
+      // 종료된 Interview에 /turns 호출 시 Backend가 409와 함께
+      // 해당 메시지를 반환하므로 화면 상태도 종료로 맞춘다.
+      if (errorMessage === "Interview is already completed") {
+        setIsInterviewCompleted(true);
+      }
 
       // /turns는 AI 호출 전에 USER 메시지를 저장할 수 있으므로
       // 실패한 경우에도 Backend 메시지 상태를 다시 확인
@@ -192,10 +220,43 @@ export default function InterviewPage() {
     }
   };
 
-  // 인터뷰 종료
-  // 현재 종료 API Contract가 없으므로 실제 요청은 하지 않음
-  const handleEndInterview = () => {
-    console.log("INTERVIEW END");
+  // 인터뷰 수동 종료
+  const handleEndInterview = async () => {
+    if (
+      !interviewId ||
+      isSending ||
+      isCompleting ||
+      isInterviewCompleted
+    ) {
+      return;
+    }
+
+    try {
+      setIsCompleting(true);
+      setMessageError("");
+
+      const completedInterview = await completeInterview(interviewId);
+
+      if (completedInterview.status === "COMPLETED") {
+        setIsInterviewCompleted(true);
+        setMessage("");
+      }
+    } catch (error) {
+      console.error("INTERVIEW COMPLETE ERROR:", error);
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "인터뷰 종료 중 오류가 발생했습니다.";
+
+      setMessageError(errorMessage);
+
+      if (errorMessage === "Interview is already completed") {
+        setIsInterviewCompleted(true);
+      }
+    } finally {
+      setIsCompleting(false);
+    }
   };
 
   // 최신 Turn에서 화면에 표시할 대표 데이터
@@ -476,13 +537,34 @@ export default function InterviewPage() {
                 </p>
               )}
 
+              {isCompleting && (
+                <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
+                  인터뷰를 종료하고 있습니다.
+                </p>
+              )}
+
+              {isInterviewCompleted && (
+                <p className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
+                  인터뷰가 종료되었습니다. 더 이상 답변을 입력할 수 없습니다.
+                </p>
+              )}
+
               <div className="flex items-end gap-2">
                 <textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  placeholder="전문가 답변을 입력하세요."
+                  placeholder={
+                    isInterviewCompleted
+                      ? "종료된 인터뷰입니다."
+                      : "전문가 답변을 입력하세요."
+                  }
                   rows={1}
-                  disabled={isSending || !interviewId}
+                  disabled={
+                    isSending ||
+                    isCompleting ||
+                    isInterviewCompleted ||
+                    !interviewId
+                  }
                   className="min-h-[48px] flex-1 resize-none rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                 />
 
@@ -490,6 +572,8 @@ export default function InterviewPage() {
                   type="submit"
                   disabled={
                     isSending ||
+                    isCompleting ||
+                    isInterviewCompleted ||
                     !interviewId ||
                     message.trim().length === 0
                   }
@@ -503,10 +587,21 @@ export default function InterviewPage() {
               <button
                 type="button"
                 onClick={handleEndInterview}
-                className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 text-sm font-bold text-rose-600 transition hover:bg-rose-100"
+                disabled={
+                  isSending ||
+                  isCompleting ||
+                  isInterviewCompleted ||
+                  !interviewId
+                }
+                className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 text-sm font-bold text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
               >
                 <Square className="h-4 w-4" />
-                인터뷰 종료
+
+                {isInterviewCompleted
+                  ? "인터뷰 종료됨"
+                  : isCompleting
+                    ? "인터뷰 종료 중..."
+                    : "인터뷰 종료"}
               </button>
             </form>
           </main>

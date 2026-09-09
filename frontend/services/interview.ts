@@ -287,6 +287,11 @@ export async function getInterviewMessages(
 // Interview 1 Turn 처리
 // Expert 답변 저장 → AI 분석 → Gap/Conflict/Question 생성
 // → 필요 시 ASSISTANT 메시지 저장까지 Backend에서 수행
+//
+// AI가 next_question=null을 반환하거나
+// Backend 최대 후속 질문 수에 도달하면
+// Backend에서 Interview를 자동 COMPLETED 처리하고
+// next_question=null을 반환함.
 export async function processInterviewTurn(
   interviewId: string,
   payload: InterviewTurnRequest
@@ -307,6 +312,39 @@ export async function processInterviewTurn(
       await getErrorMessage(
         response,
         "인터뷰 AI 처리 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Interview 수동 종료
+//
+// POST /api/v1/interviews/{interview_id}/complete
+// Request Body 없음.
+//
+// Backend에서:
+// - status = COMPLETED
+// - ended_at 기록
+//
+// 이미 COMPLETED인 경우에는 현재 Interview를 그대로 반환함.
+// CANCELLED 상태인 경우에는 409 Conflict가 반환됨.
+export async function completeInterview(
+  interviewId: string
+): Promise<InterviewResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/interviews/${interviewId}/complete`,
+    {
+      method: "POST",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "인터뷰 종료 중 오류가 발생했습니다."
       )
     );
   }
