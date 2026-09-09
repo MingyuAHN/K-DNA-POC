@@ -1,7 +1,11 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+)
 
 
 class MissionCreate(BaseModel):
@@ -19,4 +23,16 @@ class MissionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class MissionListResponse(BaseModel):
+    total: int
+
+    missions: list[
+        MissionResponse
+    ] = Field(
+        default_factory=list
+    )

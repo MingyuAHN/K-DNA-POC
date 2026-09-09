@@ -1,11 +1,24 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.mission import MissionCreate, MissionResponse
-from app.services.mission_service import create_mission, get_mission
+from app.schemas.mission import (
+    MissionCreate,
+    MissionListResponse,
+    MissionResponse,
+)
+from app.services.mission_service import (
+    create_mission,
+    get_mission,
+    get_missions,
+)
 
 
 router = APIRouter(
@@ -23,7 +36,27 @@ def create_mission_api(
     request: MissionCreate,
     db: Session = Depends(get_db),
 ):
-    return create_mission(db, request)
+    return create_mission(
+        db=db,
+        request=request,
+    )
+
+
+@router.get(
+    "",
+    response_model=MissionListResponse,
+)
+def get_missions_api(
+    db: Session = Depends(get_db),
+):
+    missions = get_missions(
+        db=db,
+    )
+
+    return MissionListResponse(
+        total=len(missions),
+        missions=missions,
+    )
 
 
 @router.get(
@@ -34,11 +67,16 @@ def get_mission_api(
     mission_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    mission = get_mission(db, mission_id)
+    mission = get_mission(
+        db=db,
+        mission_id=mission_id,
+    )
 
     if mission is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
             detail="Mission not found",
         )
 
