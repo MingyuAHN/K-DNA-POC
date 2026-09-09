@@ -40,6 +40,15 @@ from ai.services.langgraph_orchestrator import (
     LangGraphAIOrchestrator,
 )
 
+from shared.schemas.validation import (
+    KnowledgeValidationRequest,
+    KnowledgeValidationResponse,
+)
+
+from ai.agents.knowledge_validator import (
+    KnowledgeValidator,
+)
+
 from ai.agents.knowledge_extractor import KnowledgeExtractor
 from ai.agents.semantic_aligner import SemanticAligner
 from ai.agents.gap_analyzer import GapAnalyzer
@@ -205,3 +214,31 @@ def synthesize_knowledge(
         ) from exc
 
 
+@lru_cache
+def get_knowledge_validator():
+    gateway = OpenAIGateway()
+
+    return KnowledgeValidator(
+        llm_gateway=gateway
+    )
+
+
+@app.post(
+    "/api/v1/ai/knowledge/validate",
+    response_model=KnowledgeValidationResponse,
+)
+def validate_knowledge(
+    request: KnowledgeValidationRequest,
+):
+    try:
+        validator = get_knowledge_validator()
+
+        return validator.validate(
+            request
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc

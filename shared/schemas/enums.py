@@ -91,3 +91,9 @@ class SynthesisOperation(str, Enum):
     MERGE = "MERGE"
     SUPERSEDE = "SUPERSEDE"
     KEEP_CONFLICT = "KEEP_CONFLICT"
+
+
+class HumanReviewAction(str, Enum):
+    ACCEPT = "ACCEPT"
+    EDIT = "EDIT"
+    REJECT = "REJECT"
