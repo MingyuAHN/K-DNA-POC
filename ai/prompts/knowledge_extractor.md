@@ -25,11 +25,18 @@
 5. Mission 및 Interview Context는 해석에만 사용하고 새로운 사실을 생성하지 않는다.
 6. 적용 Project, Phase, Domain, System, Constraint 등이 답변에서 확인되면 Context로 구조화한다.
 7. 조건부 판단이면 decision_rule의 if_conditions / then / unless 구조를 사용한다.
-8. rationale은 전문가 답변에서 이유가 명확히 언급된 경우에만 작성한다.
-9. exception은 예외가 명확히 언급된 경우에만 작성한다.
-10. validation_status는 최초 추출 단계에서는 CANDIDATE로 설정한다.
-11. confidence_score는 해당 Candidate가 전문가 답변에서 얼마나 명확히 확인되는지를 0~1로 평가한다.
-12. 반드시 지정된 Structured Output Schema를 따른다.
+8. decision_rule을 반환하는 경우 then은 반드시 비어 있지 않은 문자열이어야 한다.
+9. 명확한 조건-결과 규칙으로 표현할 수 없는 Candidate는 decision_rule 전체를 null로 반환한다.
+10. decision_rule 객체 내부에 then: null 또는 빈 문자열("")을 반환하지 않는다.
+11. rationale은 전문가 답변에서 이유가 명확히 언급된 경우에만 작성한다.
+12. exception은 예외가 명확히 언급된 경우에만 작성한다.
+13. validation_status는 최초 추출 단계에서는 CANDIDATE로 설정한다.
+14. confidence_score는 해당 Candidate가 전문가 답변에서 얼마나 명확히 확인되는지를 0~1로 평가한다.
+15. 반드시 지정된 Structured Output Schema를 따른다.
+
+중요:
+decision_rule이 존재한다면 then은 반드시 문자열이어야 한다.
+then을 생성할 수 없다면 decision_rule 객체를 생성하지 말고 null로 반환한다.
 
 예시:
 

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .common import ContextTags
 from .enums import (
     KnowledgeType,
@@ -76,19 +76,29 @@ class DecisionRule(BaseModel):
 
 
 class KnowledgeCandidate(BaseModel):
+    # 기존 필드들 그대로
     statement: str
     type: KnowledgeType
-
     context: ContextTags
+    decision_rule: DecisionRule | None = None
+    rationale: str | None = None
+    exception: str | None = None
+    novelty_score: float
+    confidence_score: float
+    validation_status: ValidationStatus
 
-    decision_rule: Optional[DecisionRule] = None
-    rationale: Optional[str] = None
-    exception: Optional[str] = None
+    @model_validator(mode="after")
+    def normalize_decision_rule(self):
+        if self.decision_rule is not None:
+            then_value = self.decision_rule.then
 
-    novelty_score: float = Field(ge=0, le=1)
-    confidence_score: float = Field(ge=0, le=1)
+            if (
+                then_value is None
+                or not str(then_value).strip()
+            ):
+                self.decision_rule = None
 
-    validation_status: ValidationStatus = ValidationStatus.CANDIDATE
+        return self
 
 
 # Knowledge Extractor 전용 Response

@@ -1,3 +1,4 @@
+import time
 from typing import TypedDict
 
 from langgraph.graph import StateGraph, START, END
@@ -76,8 +77,17 @@ class LangGraphAIOrchestrator:
     ):
         request = state["request"]
 
+        start = time.perf_counter()
+
         result = self.knowledge_extractor.extract(
             request
+        )
+
+        elapsed = time.perf_counter() - start
+
+        print(
+            f"[PERF] knowledge_extract: "
+            f"{elapsed:.2f}s"
         )
 
         return {
@@ -96,9 +106,11 @@ class LangGraphAIOrchestrator:
 
         relations_by_candidate = []
 
-        for candidate in state.get(
-            "knowledge_candidates",
-            [],
+        for index, candidate in enumerate(
+            state.get(
+                "knowledge_candidates",
+                [],
+            )
         ):
             alignment_request = SemanticAlignmentRequest(
                 candidate=candidate,
@@ -106,8 +118,18 @@ class LangGraphAIOrchestrator:
                 retrieved_evidence=request.retrieved_evidence,
             )
 
+            start = time.perf_counter()
+
             result = self.semantic_aligner.align(
                 alignment_request
+            )
+
+            elapsed = time.perf_counter() - start
+
+            print(
+                f"[PERF] semantic_align "
+                f"candidate={index}: "
+                f"{elapsed:.2f}s"
             )
 
             relations_by_candidate.append(
@@ -128,9 +150,11 @@ class LangGraphAIOrchestrator:
 
         gaps_by_candidate = []
 
-        for candidate in state.get(
-            "knowledge_candidates",
-            [],
+        for index, candidate in enumerate(
+            state.get(
+                "knowledge_candidates",
+                [],
+            )
         ):
             gap_request = GapAnalysisRequest(
                 candidate=candidate,
@@ -146,8 +170,18 @@ class LangGraphAIOrchestrator:
                 ),
             )
 
+            start = time.perf_counter()
+
             result = self.gap_analyzer.analyze(
                 gap_request
+            )
+
+            elapsed = time.perf_counter() - start
+
+            print(
+                f"[PERF] gap_analyze "
+                f"candidate={index}: "
+                f"{elapsed:.2f}s"
             )
 
             gaps_by_candidate.append(
@@ -199,8 +233,18 @@ class LangGraphAIOrchestrator:
                 ),
             )
 
+            start = time.perf_counter()
+
             result = self.conflict_detector.detect(
                 conflict_request
+            )
+
+            elapsed = time.perf_counter() - start
+
+            print(
+                f"[PERF] conflict_detect "
+                f"candidate={index}: "
+                f"{elapsed:.2f}s"
             )
 
             conflicts_by_candidate.append(
@@ -286,8 +330,17 @@ class LangGraphAIOrchestrator:
             ),
         )
 
+        start = time.perf_counter()
+
         result = self.question_planner.plan(
             question_request
+        )
+
+        elapsed = time.perf_counter() - start
+
+        print(
+            f"[PERF] question_plan: "
+            f"{elapsed:.2f}s"
         )
 
         questions = select_questions(
@@ -437,12 +490,23 @@ class LangGraphAIOrchestrator:
     def analyze(
         self,
         request: InterviewAnalysisRequest,
-    ) -> InterviewAnalysisResponse:
+    ):
+        total_start = time.perf_counter()
 
-        state = self.graph.invoke(
+        result = self.graph.invoke(
             {
                 "request": request
             }
         )
 
-        return state["response"]
+        total_elapsed = (
+            time.perf_counter()
+            - total_start
+        )
+
+        print(
+            f"[PERF] TOTAL interview_analyze: "
+            f"{total_elapsed:.2f}s"
+        )
+
+        return result["response"]
