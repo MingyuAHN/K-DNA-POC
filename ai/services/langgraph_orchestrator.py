@@ -16,6 +16,12 @@ from shared.schemas.interview import (
     QuestionPlanningRequest,
 )
 
+from ai.services.result_postprocessor import (
+    select_knowledge_candidates,
+    deduplicate_gaps,
+    select_conflicts,
+    select_questions,
+)
 
 class KDNAState(TypedDict, total=False):
     request: InterviewAnalysisRequest
@@ -34,11 +40,15 @@ class KDNAState(TypedDict, total=False):
         list[ConflictResult]
     ]
 
+    reduced_gaps: list[KnowledgeGap]
+    reduced_conflicts: list[ConflictResult]
+
     question_candidates: list[QuestionCandidate]
 
     next_question: QuestionCandidate | None
 
     response: InterviewAnalysisResponse
+
 
 
 class LangGraphAIOrchestrator:
@@ -72,7 +82,9 @@ class LangGraphAIOrchestrator:
 
         return {
             "knowledge_candidates":
-                result.knowledge_candidates
+                select_knowledge_candidates(
+                    result.knowledge_candidates
+                )
         }
 
     # 2. Semantic Alignment
@@ -200,7 +212,39 @@ class LangGraphAIOrchestrator:
                 conflicts_by_candidate
         }
 
-    # 5. Question Planning
+    # 5. Gap / Conflict Dedup & Top-K
+    def _reduce_results(
+        self,
+        state: KDNAState,
+    ):
+        all_gaps = [
+            gap
+            for candidate_gaps in state.get(
+                "gaps_by_candidate",
+                [],
+            )
+            for gap in candidate_gaps
+        ]
+
+        all_conflicts = [
+            conflict
+            for candidate_conflicts in state.get(
+                "conflicts_by_candidate",
+                [],
+            )
+            for conflict in candidate_conflicts
+        ]
+
+        return {
+            "reduced_gaps": deduplicate_gaps(
+                all_gaps
+            ),
+            "reduced_conflicts": select_conflicts(
+                all_conflicts
+            ),
+        }
+
+    # 6. Question Planning
     def _question_plan(
         self,
         state: KDNAState,
@@ -212,67 +256,56 @@ class LangGraphAIOrchestrator:
             [],
         )
 
-        gaps_by_candidate = state.get(
-            "gaps_by_candidate",
-            [],
+        if not candidates:
+            return {
+                "question_candidates": [],
+                "next_question": None,
+            }
+
+        primary_candidate = max(
+            candidates,
+            key=lambda item: (
+                item.confidence_score,
+                item.novelty_score,
+            ),
         )
 
-        conflicts_by_candidate = state.get(
-            "conflicts_by_candidate",
-            [],
+        question_request = QuestionPlanningRequest(
+            candidate=primary_candidate,
+            mission=request.mission,
+            gaps=state.get(
+                "reduced_gaps",
+                [],
+            ),
+            conflicts=state.get(
+                "reduced_conflicts",
+                [],
+            ),
+            conversation_context=(
+                request.conversation_context[-8:]
+            ),
         )
 
-        all_questions = []
+        result = self.question_planner.plan(
+            question_request
+        )
 
-        for index, candidate in enumerate(
-            candidates
-        ):
-            gaps = (
-                gaps_by_candidate[index]
-                if index < len(gaps_by_candidate)
-                else []
-            )
+        questions = select_questions(
+            result.question_candidates
+        )
 
-            conflicts = (
-                conflicts_by_candidate[index]
-                if index < len(conflicts_by_candidate)
-                else []
-            )
-
-            question_request = QuestionPlanningRequest(
-                candidate=candidate,
-                mission=request.mission,
-                gaps=gaps,
-                conflicts=conflicts,
-                conversation_context=(
-                    request.conversation_context
-                ),
-            )
-
-            result = self.question_planner.plan(
-                question_request
-            )
-
-            all_questions.extend(
-                result.question_candidates
-            )
-
-        next_question = None
-
-        if all_questions:
-            next_question = max(
-                all_questions,
-                key=lambda q: q.value_score,
-            )
+        next_question = (
+            questions[0]
+            if questions
+            else None
+        )
 
         return {
-            "question_candidates":
-                all_questions,
-            "next_question":
-                next_question,
+            "question_candidates": questions,
+            "next_question": next_question,
         }
 
-    # 6. Final Response
+    # 7. Final Response
     def _finalize(
         self,
         state: KDNAState,
@@ -300,8 +333,14 @@ class LangGraphAIOrchestrator:
                 "knowledge_candidates",
                 [],
             ),
-            gaps=all_gaps,
-            conflicts=all_conflicts,
+            gaps=state.get(
+                "reduced_gaps",
+                [],
+            ),
+            conflicts=state.get(
+                "reduced_conflicts",
+                [],
+            ),
             question_candidates=state.get(
                 "question_candidates",
                 [],
@@ -348,6 +387,11 @@ class LangGraphAIOrchestrator:
             self._finalize,
         )
 
+        builder.add_node(
+            "reduce_results",
+            self._reduce_results,
+        )
+
         builder.add_edge(
             START,
             "knowledge_extract",
@@ -370,6 +414,11 @@ class LangGraphAIOrchestrator:
 
         builder.add_edge(
             "conflict_detect",
+            "reduce_results",
+        )
+
+        builder.add_edge(
+            "reduce_results",
             "question_plan",
         )
 
