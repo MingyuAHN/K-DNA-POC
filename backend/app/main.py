@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -50,6 +51,29 @@ app = FastAPI(
 )
 
 
+# ============================================================
+# CORS
+# ============================================================
+
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# Routers
+# ============================================================
+
 app.include_router(mission_router)
 app.include_router(document_router)
 app.include_router(baseline_claim_router)
@@ -66,6 +90,10 @@ app.include_router(
     knowledge_synthesis_validation_router
 )
 
+
+# ============================================================
+# Health
+# ============================================================
 
 @app.get("/health")
 def health_check():
