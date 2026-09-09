@@ -21,8 +21,9 @@ import { interviewMock } from "@/mocks/interviewMock";
 import { getMission, type MissionResponse } from "@/services/mission";
 import {
   getInterviewMessages,
-  sendInterviewMessage,
+  processInterviewTurn,
   type InterviewMessage,
+  type InterviewTurnResponse,
 } from "@/services/interview";
 
 const coverageIconMap = {
@@ -59,6 +60,10 @@ export default function InterviewPage() {
   // 실제 Interview 대화 목록
   const [messages, setMessages] = useState<InterviewMessage[]>([]);
 
+  // 가장 최근 AI /turns 분석 결과
+  const [latestTurn, setLatestTurn] =
+    useState<InterviewTurnResponse | null>(null);
+
   // Mission 조회 상태
   const [mission, setMission] = useState<MissionResponse | null>(null);
   const [missionLoading, setMissionLoading] = useState(true);
@@ -69,9 +74,8 @@ export default function InterviewPage() {
   const [messageError, setMessageError] = useState("");
   const [isSending, setIsSending] = useState(false);
 
-  // 아직 실제 API 미연동 영역
+  // Coverage는 아직 실제 API 미연동 영역
   const coverageItems = interviewMock.coverageItems;
-  const insights = interviewMock.insights;
 
   // URL의 missionId 기준 실제 Mission 조회
   useEffect(() => {
@@ -156,24 +160,33 @@ export default function InterviewPage() {
       setIsSending(true);
       setMessageError("");
 
-      // Expert 답변 저장
-      await sendInterviewMessage(interviewId, {
+      // 변경:
+      // 기존 /messages 단순 저장 대신 /turns 호출
+      // Backend에서 USER 저장 → AI 분석 → ASSISTANT 저장까지 수행
+      const turnResult = await processInterviewTurn(interviewId, {
         content: trimmedMessage,
       });
 
-      // 저장 성공 후 입력창 비우기
+      // 최신 AI 분석 결과 저장
+      setLatestTurn(turnResult);
+
+      // 성공 후 입력창 초기화
       setMessage("");
 
-      // Backend 기준 최신 메시지 이력 재조회
+      // USER + ASSISTANT 메시지를 Backend 기준으로 다시 조회
       await fetchMessages();
     } catch (error) {
-      console.error("INTERVIEW MESSAGE SEND ERROR:", error);
+      console.error("INTERVIEW TURN ERROR:", error);
 
       setMessageError(
         error instanceof Error
           ? error.message
-          : "메시지 전송 중 오류가 발생했습니다."
+          : "인터뷰 AI 처리 중 오류가 발생했습니다."
       );
+
+      // /turns는 AI 호출 전에 USER 메시지를 저장할 수 있으므로
+      // 실패한 경우에도 Backend 메시지 상태를 다시 확인
+      await fetchMessages();
     } finally {
       setIsSending(false);
     }
@@ -184,6 +197,23 @@ export default function InterviewPage() {
   const handleEndInterview = () => {
     console.log("INTERVIEW END");
   };
+
+  // 최신 Turn에서 화면에 표시할 대표 데이터
+  const latestKnowledgeCandidate =
+    latestTurn?.knowledge_candidates[0] ?? null;
+
+  const latestExceptionCandidate =
+    latestTurn?.knowledge_candidates.find(
+      (candidate) =>
+        candidate.type === "EXCEPTION" ||
+        Boolean(candidate.exception)
+    ) ?? null;
+
+  const latestConflict =
+    latestTurn?.conflicts[0] ?? null;
+
+  const latestGap =
+    latestTurn?.gaps[0] ?? null;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
@@ -440,6 +470,12 @@ export default function InterviewPage() {
                 </p>
               )}
 
+              {isSending && (
+                <p className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-600">
+                  Expert 답변을 분석하고 다음 질문을 생성하고 있습니다.
+                </p>
+              )}
+
               <div className="flex items-end gap-2">
                 <textarea
                   value={message}
@@ -493,85 +529,159 @@ export default function InterviewPage() {
               </div>
             </div>
 
-            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-bold text-slate-500">
-                AI `/turns` 연동 전 예시 데이터입니다.
-              </p>
-            </div>
+            {!latestTurn ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center">
+                <Lightbulb className="mx-auto h-6 w-6 text-slate-300" />
 
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                <div className="mb-2 flex items-center gap-2 text-blue-600">
-                  <BookOpen className="h-4 w-4" />
+                <p className="mt-2 text-xs font-bold text-slate-500">
+                  아직 AI 분석 결과가 없습니다.
+                </p>
 
-                  <span className="text-[11px] font-black uppercase">
-                    New Rule
-                  </span>
-                </div>
-
-                <h3 className="text-sm font-black text-slate-900">
-                  {insights.newRule.title}
-                </h3>
-
-                <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                  {insights.newRule.description}
+                <p className="mt-1 text-[11px] font-medium leading-5 text-slate-400">
+                  전문가 답변을 전송하면 Knowledge Candidate, Gap,
+                  Conflict 분석 결과가 표시됩니다.
                 </p>
               </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Knowledge Candidate */}
+                {latestKnowledgeCandidate && (
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-blue-600">
+                      <BookOpen className="h-4 w-4" />
 
-              <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
-                <div className="mb-2 flex items-center gap-2 text-amber-600">
-                  <ShieldAlert className="h-4 w-4" />
+                      <span className="text-[11px] font-black uppercase">
+                        New Knowledge
+                      </span>
+                    </div>
 
-                  <span className="text-[11px] font-black uppercase">
-                    Exception
-                  </span>
-                </div>
+                    <p className="mb-1 text-[10px] font-black uppercase text-blue-500">
+                      {latestKnowledgeCandidate.type}
+                    </p>
 
-                <h3 className="text-sm font-black text-slate-900">
-                  {insights.exception.title}
-                </h3>
+                    <h3 className="text-sm font-black text-slate-900">
+                      {latestKnowledgeCandidate.statement}
+                    </h3>
 
-                <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                  {insights.exception.description}
-                </p>
+                    {latestKnowledgeCandidate.rationale && (
+                      <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
+                        {latestKnowledgeCandidate.rationale}
+                      </p>
+                    )}
+
+                    <p className="mt-2 text-[10px] font-bold text-slate-400">
+                      Confidence{" "}
+                      {Math.round(
+                        latestKnowledgeCandidate.confidence_score * 100
+                      )}
+                      %
+                    </p>
+                  </div>
+                )}
+
+                {/* Exception */}
+                {latestExceptionCandidate && (
+                  <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-amber-600">
+                      <ShieldAlert className="h-4 w-4" />
+
+                      <span className="text-[11px] font-black uppercase">
+                        Exception
+                      </span>
+                    </div>
+
+                    <h3 className="text-sm font-black text-slate-900">
+                      {latestExceptionCandidate.type === "EXCEPTION"
+                        ? latestExceptionCandidate.statement
+                        : latestExceptionCandidate.exception}
+                    </h3>
+
+                    {latestExceptionCandidate.type === "EXCEPTION" &&
+                      latestExceptionCandidate.exception && (
+                        <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
+                          {latestExceptionCandidate.exception}
+                        </p>
+                      )}
+                  </div>
+                )}
+
+                {/* Conflict */}
+                {latestConflict && (
+                  <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-rose-600">
+                      <AlertTriangle className="h-4 w-4" />
+
+                      <span className="text-[11px] font-black uppercase">
+                        Conflict
+                      </span>
+                    </div>
+
+                    <p className="mb-1 text-[10px] font-black uppercase text-rose-500">
+                      {latestConflict.conflict_type} ·{" "}
+                      {latestConflict.severity}
+                    </p>
+
+                    <h3 className="text-sm font-black text-slate-900">
+                      {latestConflict.description}
+                    </h3>
+
+                    {latestConflict.context_difference && (
+                      <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
+                        {latestConflict.context_difference}
+                      </p>
+                    )}
+
+                    {latestConflict.recommended_question && (
+                      <p className="mt-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold leading-5 text-rose-600">
+                        {latestConflict.recommended_question}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Gap */}
+                {latestGap && (
+                  <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-violet-600">
+                      <CircleAlert className="h-4 w-4" />
+
+                      <span className="text-[11px] font-black uppercase">
+                        Gap
+                      </span>
+                    </div>
+
+                    <p className="mb-1 text-[10px] font-black uppercase text-violet-500">
+                      {latestGap.topic} · {latestGap.dimension}
+                    </p>
+
+                    <h3 className="text-sm font-black text-slate-900">
+                      {latestGap.gap_type}
+                    </h3>
+
+                    <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
+                      {latestGap.reason}
+                    </p>
+
+                    <p className="mt-2 text-[10px] font-bold text-slate-400">
+                      Gap Score {Math.round(latestGap.gap_score * 100)}%
+                    </p>
+                  </div>
+                )}
+
+                {/* 분석 결과는 왔지만 표시할 항목이 없는 경우 */}
+                {!latestKnowledgeCandidate &&
+                  !latestExceptionCandidate &&
+                  !latestConflict &&
+                  !latestGap && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold text-slate-500">
+                        이번 답변에서 표시할 Knowledge Candidate, Gap,
+                        Conflict가 생성되지 않았습니다.
+                      </p>
+                    </div>
+                  )}
               </div>
-
-              <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4">
-                <div className="mb-2 flex items-center gap-2 text-rose-600">
-                  <AlertTriangle className="h-4 w-4" />
-
-                  <span className="text-[11px] font-black uppercase">
-                    Conflict
-                  </span>
-                </div>
-
-                <h3 className="text-sm font-black text-slate-900">
-                  {insights.conflict.title}
-                </h3>
-
-                <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                  {insights.conflict.description}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
-                <div className="mb-2 flex items-center gap-2 text-violet-600">
-                  <CircleAlert className="h-4 w-4" />
-
-                  <span className="text-[11px] font-black uppercase">
-                    Gap
-                  </span>
-                </div>
-
-                <h3 className="text-sm font-black text-slate-900">
-                  {insights.gap.title}
-                </h3>
-
-                <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                  {insights.gap.description}
-                </p>
-              </div>
-            </div>
+            )}
           </aside>
         </div>
       </div>

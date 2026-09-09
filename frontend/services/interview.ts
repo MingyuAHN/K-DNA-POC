@@ -64,6 +64,95 @@ export type InterviewMessagesResponse = {
   messages: InterviewMessage[];
 };
 
+// ============================================================
+// Interview Turn
+// ============================================================
+
+export type KnowledgeContext = {
+  project: string | null;
+  phase: string | null;
+  domain: string | null;
+  system: string | null;
+  scope: string | null;
+  time: string | null;
+  constraints: string[];
+  tags: string[];
+};
+
+export type DecisionRule = {
+  if_conditions: string[];
+  then: string;
+  unless: string[];
+};
+
+export type KnowledgeCandidateItem = {
+  statement: string;
+  type: string;
+  context: KnowledgeContext;
+  decision_rule: DecisionRule | null;
+  rationale: string | null;
+  exception: string | null;
+  novelty_score: number;
+  confidence_score: number;
+  validation_status: string;
+};
+
+export type KnowledgeGapItem = {
+  topic: string;
+  dimension: string;
+  gap_type: string;
+  gap_score: number;
+  reason: string;
+};
+
+export type ConflictSourceItem = {
+  source_type: string;
+  source_id: string | null;
+  content: string;
+};
+
+export type KnowledgeConflictItem = {
+  conflict_type: string;
+  severity: string;
+  description: string;
+  sources: ConflictSourceItem[];
+  context_difference: string | null;
+  unknown_condition: string | null;
+  recommended_question: string | null;
+};
+
+export type QuestionCandidateItem = {
+  question: string;
+  question_type: string;
+  target_gap: string | null;
+  gap_reduction_score: number;
+  novelty_score: number;
+  business_impact_score: number;
+  conflict_resolution_score: number;
+  redundancy_score: number;
+  value_score: number;
+};
+
+export type InterviewTurnRequest = {
+  content: string;
+  knowledge_top_k?: number;
+  evidence_top_k?: number;
+  history_limit?: number;
+};
+
+export type InterviewTurnResponse = {
+  analysis_id: string;
+  interview_id: string;
+  user_message_id: string;
+  assistant_message_id: string | null;
+  user_message: string;
+  knowledge_candidates: KnowledgeCandidateItem[];
+  gaps: KnowledgeGapItem[];
+  conflicts: KnowledgeConflictItem[];
+  question_candidates: QuestionCandidateItem[];
+  next_question: QuestionCandidateItem | null;
+};
+
 // Backend 오류 응답 메시지 추출
 async function getErrorMessage(
   response: Response,
@@ -138,6 +227,9 @@ export async function createInterview(
 }
 
 // Expert 메시지 저장
+// 기본 메시지 저장 API.
+// /turns 연동 이후 Interview 입력에서는 이 함수와
+// processInterviewTurn()을 동시에 호출하면 안 됨.
 export async function sendInterviewMessage(
   interviewId: string,
   payload: InterviewMessageCreateRequest
@@ -190,4 +282,34 @@ export async function getInterviewMessages(
       (a, b) => a.sequence - b.sequence
     ),
   };
+}
+
+// Interview 1 Turn 처리
+// Expert 답변 저장 → AI 분석 → Gap/Conflict/Question 생성
+// → 필요 시 ASSISTANT 메시지 저장까지 Backend에서 수행
+export async function processInterviewTurn(
+  interviewId: string,
+  payload: InterviewTurnRequest
+): Promise<InterviewTurnResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/interviews/${interviewId}/turns`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "인터뷰 AI 처리 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
 }
