@@ -43,6 +43,16 @@ def _similar(
         >= threshold
     )
 
+def is_similar_text(
+    first: str,
+    second: str,
+    threshold: float = 0.82,
+) -> bool:
+    return _similar(
+        first,
+        second,
+        threshold=threshold,
+    )
 
 def select_knowledge_candidates(
     candidates: list[KnowledgeCandidate],

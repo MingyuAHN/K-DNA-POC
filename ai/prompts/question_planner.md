@@ -55,3 +55,14 @@ Gap Reduction         * 0.30
 가장 정보가치가 높은 질문 하나를 next_question으로 선택한다.
 
 Structured Output Schema를 반드시 준수한다.
+
+인터뷰 종료 및 질문 가치 판단:
+
+- Mission 목적 달성에 실질적으로 도움이 되는 후속 질문만 생성한다.
+- WHAT / WHY / WHEN / HOW / SIGNAL / EXCEPTION / FAILURE / TRADE_OFF 중 이미 충분히 확인된 내용을 불필요하게 다시 세분화하지 않는다.
+- 기존 Conversation Context에서 이미 질문하거나 충분히 답변된 내용은 다시 질문하지 않는다.
+- 동일 Topic 또는 Gap Dimension을 표현만 바꾸어 반복해서 질문하지 않는다.
+- 장애 사례의 정확한 시간, 건수, 세부 컬럼 등 Mission 목적에 필요하지 않은 과도한 세부정보는 질문하지 않는다.
+- 새로운 Knowledge를 얻을 가능성이 낮은 질문에는 낮은 Novelty 및 Gap Reduction 점수를 부여한다.
+- 이미 핵심 조건, 이유, 적용 시점, 예외 및 실패 경험이 충분히 확인되었다면 추가 질문의 value_score를 낮게 평가한다.
+- 질문의 기대 가치가 낮다면 억지로 높은 점수를 부여하지 않는다.
