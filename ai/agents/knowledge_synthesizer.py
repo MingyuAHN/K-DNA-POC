@@ -44,8 +44,29 @@ Knowledge Synthesis를 수행하세요.
 {existing_knowledge}
 """
 
-        return self.llm.generate_structured(
+        result = self.llm.generate_structured(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
             response_model=KnowledgeSynthesisResponse,
         )
+
+        valid_knowledge_ids = {
+            knowledge.knowledge_id
+            for knowledge in request.existing_knowledge
+        }
+
+        for target_id in result.target_knowledge_ids:
+            if target_id not in valid_knowledge_ids:
+                raise ValueError(
+                    "Synthesis result contains unknown target_knowledge_id: "
+                    f"{target_id}"
+                )
+
+        for relation in result.relations:
+            if relation.target_knowledge_id not in valid_knowledge_ids:
+                raise ValueError(
+                    "Synthesis relation contains unknown target_knowledge_id: "
+                    f"{relation.target_knowledge_id}"
+                )
+
+        return result

@@ -36,6 +36,10 @@ from shared.schemas.interview import (
     InterviewAnalysisResponse,
 )
 
+from ai.services.langgraph_orchestrator import (
+    LangGraphAIOrchestrator,
+)
+
 from ai.agents.knowledge_extractor import KnowledgeExtractor
 from ai.agents.semantic_aligner import SemanticAligner
 from ai.agents.gap_analyzer import GapAnalyzer
@@ -140,7 +144,7 @@ def create_embeddings(
 def get_interview_orchestrator():
     gateway = OpenAIGateway()
 
-    return AIOrchestrator(
+    return LangGraphAIOrchestrator(
         knowledge_extractor=KnowledgeExtractor(gateway),
         semantic_aligner=SemanticAligner(gateway),
         gap_analyzer=GapAnalyzer(gateway),
@@ -199,3 +203,5 @@ def synthesize_knowledge(
             status_code=500,
             detail=str(exc),
         ) from exc
+
+

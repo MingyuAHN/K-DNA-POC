@@ -92,3 +92,7 @@ Candidate와 기존 Knowledge가 의미적으로 매우 유사하며
     기본 validation_status는 CANDIDATE로 유지한다.
 
 14. 반드시 지정된 Structured Output Schema를 따른다.
+
+15. target_knowledge_ids와 relations[].target_knowledge_id는
+    반드시 입력 existing_knowledge[].knowledge_id 중 하나를 그대로 사용한다.
+    ID를 새로 생성하거나 수정하지 않는다.
