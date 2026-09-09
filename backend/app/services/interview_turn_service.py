@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -24,6 +25,38 @@ from app.services.interview_service import (
     add_interview_message,
     get_interview,
 )
+
+
+def _convert_message_for_ai(
+    message: Any,
+) -> dict[str, Any]:
+    """
+    Backend Interview Message를
+    AI Interview Analyze Contract 형식으로 변환한다.
+
+    Backend 내부:
+        role = USER / ASSISTANT
+
+    AI 서버 Contract:
+        speaker = USER / ASSISTANT
+
+    DB 및 Backend Schema의 role 필드는 그대로 유지하고,
+    AI 서버로 요청할 때만 role -> speaker로 변환한다.
+    """
+
+    data = message.model_dump(
+        mode="json"
+    )
+
+    role = data.pop(
+        "role",
+        None,
+    )
+
+    if role is not None:
+        data["speaker"] = role
+
+    return data
 
 
 def run_interview_turn(
@@ -101,14 +134,26 @@ def run_interview_turn(
         # -----------------------------------------------------
         # 3. AI Interview Orchestration Request 구성
         #
-        # AI 팀과 합의한 Request 구조:
+        # AI 서버 실제 Contract:
         #
         # mission
         # interview
         # message
+        #   - speaker
+        #   - content
+        #   - ...
+        #
         # conversation_context
+        #   - speaker
+        #   - content
+        #   - ...
+        #
         # retrieved_knowledge
         # retrieved_evidence
+        #
+        # 중요:
+        # Backend 내부에서는 role을 사용하지만
+        # AI 요청에서는 speaker로 변환한다.
         # -----------------------------------------------------
         ai_payload = {
             "mission": (
@@ -122,13 +167,13 @@ def run_interview_turn(
                 )
             ),
             "message": (
-                context.message.model_dump(
-                    mode="json"
+                _convert_message_for_ai(
+                    context.message
                 )
             ),
             "conversation_context": [
-                item.model_dump(
-                    mode="json"
+                _convert_message_for_ai(
+                    item
                 )
                 for item
                 in context.conversation_context
@@ -190,14 +235,16 @@ def run_interview_turn(
         # -----------------------------------------------------
         # 6. Interview Analysis 결과 저장
         #
-        # 중요:
-        # request_context에 실제 AI로 전달한 ai_payload 전체를
-        # 저장한다.
+        # request_context에는 AI 서버에 실제로 전달한
+        # ai_payload 전체를 저장한다.
         #
-        # 따라서 나중에
-        # "어떤 Context를 보고 이 Candidate / Gap / Conflict가
-        # 생성됐는가?"
-        # 를 추적할 수 있다.
+        # 따라서 message / conversation_context 역시
+        # role이 아닌 speaker 형태로 저장된다.
+        #
+        # 나중에
+        # "AI가 어떤 Context를 보고 Candidate / Gap /
+        # Conflict를 생성했는가?"
+        # 를 그대로 추적할 수 있다.
         # -----------------------------------------------------
         analysis = save_interview_analysis(
             db=db,
