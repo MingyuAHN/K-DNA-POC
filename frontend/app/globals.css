@@ -679,3 +679,66 @@ textarea::placeholder {
   .profile-card { padding: 5px 6px 5px 10px; border-radius: 18px; }
   .profile-avatar { width: 38px; height: 38px; border-radius: 14px; }
 }
+
+/* ============================================================
+   Knowledge DNA - React Flow 전용 스타일
+   다른 화면에는 영향 없음
+============================================================ */
+
+.knowledge-dna-flow .react-flow__node,
+.knowledge-dna-flow .react-flow__node:focus,
+.knowledge-dna-flow .react-flow__node:focus-visible,
+.knowledge-dna-flow .react-flow__node.selected {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* 노드 선택 시 React Flow 기본 검은 경계 제거 */
+.knowledge-dna-flow .react-flow__node-default {
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+/* Flow 조작 버튼 */
+.knowledge-dna-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.knowledge-dna-flow .react-flow__controls-button {
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+}
+
+.knowledge-dna-flow .react-flow__controls-button:hover {
+  background: #f8fafc;
+}
+
+/* React Flow 기본 attribution */
+.knowledge-dna-flow .react-flow__attribution {
+  font-size: 8px;
+  opacity: 0.35;
+}
+
+/* ============================================================
+   Knowledge DNA - React Flow Handle 숨김
+   DNA Graph 내부에만 적용
+============================================================ */
+
+/* 노드 좌우에 보이는 검은 연결점 숨김 */
+.knowledge-dna-flow .react-flow__handle {
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 1px !important;
+  min-height: 1px !important;
+
+  border: none !important;
+  background: transparent !important;
+  opacity: 0 !important;
+
+  pointer-events: none !important;
+}
