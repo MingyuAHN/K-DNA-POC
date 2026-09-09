@@ -84,7 +84,9 @@ CREATE TABLE IF NOT EXISTS document (
                 'PARSING',
                 'PARSED',
                 'CHUNKING',
+                'CHUNKED',
                 'CLAIM_EXTRACTING',
+                'CLAIMS_EXTRACTED',
                 'EMBEDDING',
                 'COMPLETED',
                 'FAILED'

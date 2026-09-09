@@ -1,8 +1,5 @@
 from fastapi import Depends, FastAPI
-
-# [추가] Frontend(localhost:3000)에서 Backend(127.0.0.1:8000) API 호출 허용용 CORS Middleware
 from fastapi.middleware.cors import CORSMiddleware
-
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -54,20 +51,28 @@ app = FastAPI(
 )
 
 
-# [추가] 로컬 Frontend와 Backend가 서로 다른 Origin이므로 CORS 허용
-# Frontend: http://localhost:3000
-# Backend:  http://127.0.0.1:8000
+# ============================================================
+# CORS
+# ============================================================
+
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ============================================================
+# Routers
+# ============================================================
 
 app.include_router(mission_router)
 app.include_router(document_router)
@@ -85,6 +90,10 @@ app.include_router(
     knowledge_synthesis_validation_router
 )
 
+
+# ============================================================
+# Health
+# ============================================================
 
 @app.get("/health")
 def health_check():
