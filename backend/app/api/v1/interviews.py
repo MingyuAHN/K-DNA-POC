@@ -34,6 +34,7 @@ from app.services.interview_query_service import (
 )
 from app.services.interview_service import (
     add_interview_message,
+    complete_interview,
     create_interview,
     get_interview_messages,
 )
@@ -151,4 +152,18 @@ def create_interview_turn_api(
         db=db,
         interview_id=interview_id,
         request=request,
+    )
+
+
+@router.post(
+    "/interviews/{interview_id}/complete",
+    response_model=InterviewResponse,
+)
+def complete_interview_api(
+    interview_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    return complete_interview(
+        db=db,
+        interview_id=interview_id,
     )

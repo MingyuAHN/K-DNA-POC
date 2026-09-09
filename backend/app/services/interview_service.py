@@ -68,6 +68,81 @@ def create_interview(
     return interview
 
 
+def complete_interview(
+    db: Session,
+    interview_id: uuid.UUID,
+) -> Interview:
+    """
+    인터뷰를 정상 종료한다.
+
+    - CREATED / IN_PROGRESS -> COMPLETED
+    - 이미 COMPLETED면 그대로 반환
+    - CANCELLED는 완료 처리할 수 없음
+    """
+
+    interview = get_interview(
+        db=db,
+        interview_id=interview_id,
+    )
+
+    if interview is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interview not found",
+        )
+
+    if interview.status == "COMPLETED":
+        return interview
+
+    if interview.status == "CANCELLED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cancelled interview cannot "
+                "be completed"
+            ),
+        )
+
+    interview.status = "COMPLETED"
+    interview.ended_at = datetime.now(
+        timezone.utc
+    )
+
+    db.commit()
+    db.refresh(interview)
+
+    return interview
+
+
+def count_interview_messages_by_role(
+    db: Session,
+    interview_id: uuid.UUID,
+    role: str,
+) -> int:
+    """
+    특정 Interview에서 USER / ASSISTANT / SYSTEM
+    메시지 개수를 반환한다.
+
+    후속 질문 수 제한 등에 사용한다.
+    """
+
+    return (
+        db.query(
+            func.count(
+                InterviewMessage.message_id
+            )
+        )
+        .filter(
+            InterviewMessage.interview_id
+            == interview_id,
+            InterviewMessage.role
+            == role.upper(),
+        )
+        .scalar()
+        or 0
+    )
+
+
 def add_interview_message(
     db: Session,
     interview_id: uuid.UUID,
@@ -84,6 +159,21 @@ def add_interview_message(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Interview not found",
+        )
+
+    # ---------------------------------------------------------
+    # 종료된 Interview에는 메시지 추가 불가
+    # ---------------------------------------------------------
+    if interview.status == "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Interview is already completed",
+        )
+
+    if interview.status == "CANCELLED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Interview is cancelled",
         )
 
     if not content or not content.strip():
