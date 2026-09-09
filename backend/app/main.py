@@ -1,4 +1,8 @@
 from fastapi import Depends, FastAPI
+
+# [추가] Frontend(localhost:3000)에서 Backend(127.0.0.1:8000) API 호출 허용용 CORS Middleware
+from fastapi.middleware.cors import CORSMiddleware
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -47,6 +51,21 @@ from app.db.session import get_db
 app = FastAPI(
     title="K-DNA PoC Backend",
     version="0.1.0",
+)
+
+
+# [추가] 로컬 Frontend와 Backend가 서로 다른 Origin이므로 CORS 허용
+# Frontend: http://localhost:3000
+# Backend:  http://127.0.0.1:8000
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

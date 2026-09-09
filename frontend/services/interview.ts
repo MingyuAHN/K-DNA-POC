@@ -14,16 +14,16 @@ export type InterviewMessageRole =
 
 export type ExpertCreateRequest = {
   name: string;
-  organization: string;
-  role: string;
+  organization?: string | null;
+  role?: string | null;
   metadata: Record<string, unknown>;
 };
 
 export type ExpertResponse = {
   expert_id: string;
   name: string;
-  organization: string;
-  role: string;
+  organization: string | null;
+  role: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -31,14 +31,14 @@ export type ExpertResponse = {
 
 export type InterviewCreateRequest = {
   expert_id: string;
-  title: string;
+  title?: string | null;
 };
 
 export type InterviewResponse = {
   interview_id: string;
   mission_id: string;
   expert_id: string;
-  title: string;
+  title: string | null;
   status: InterviewStatus;
   started_at: string | null;
   ended_at: string | null;
@@ -56,7 +56,6 @@ export type InterviewMessage = {
   role: InterviewMessageRole;
   content: string;
   sequence: number;
-  metadata: Record<string, unknown>;
   created_at: string;
 };
 
