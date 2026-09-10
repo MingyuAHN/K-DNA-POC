@@ -13,8 +13,6 @@ import {
   BriefcaseBusiness,
 } from "lucide-react";
 
-import { dashboardMock } from "@/mocks/dashboardMock";
-
 import {
   getMissions,
   type MissionResponse,
@@ -25,44 +23,71 @@ import {
   type InterviewResponse,
 } from "@/services/interview";
 
+import {
+  getMissionKnowledgeUnits,
+  type KnowledgeUnitResponse,
+} from "@/services/dashboard";
+
+import {
+  getMissionConflicts,
+} from "@/services/conflict";
+
 type ActiveMissionItem = {
   mission: MissionResponse;
   interview: InterviewResponse;
 };
 
-export default function DashboardPage() {
-  const dashboardData = dashboardMock;
+// 전체 KPI 실데이터
+type DashboardSummary = {
+  knowledgeUnits: number;
+  verifiedKnowledge: number;
+  conflicts: number;
+};
 
-  // 실제 진행 가능한 Mission 목록
+export default function DashboardPage() {
+ 
+  // 진행 가능한 Mission
   const [activeMissions, setActiveMissions] = useState<
     ActiveMissionItem[]
   >([]);
 
+  // 전체 Mission
+  const [allMissions, setAllMissions] = useState<MissionResponse[]>(
+    []
+  );
+
+  // 실데이터 KPI
+  const [realSummary, setRealSummary] =
+    useState<DashboardSummary>({
+      knowledgeUnits: 0,
+      verifiedKnowledge: 0,
+      conflicts: 0,
+    });
+
   const [activeMissionsLoading, setActiveMissionsLoading] =
     useState(true);
+
+  const [summaryLoading, setSummaryLoading] = useState(true);
 
   const [activeMissionsError, setActiveMissionsError] =
     useState("");
 
+  const [summaryError, setSummaryError] = useState("");
+
   // ============================================================
-  // Dashboard 진행 Mission 조회
-  //
-  // Mission 목록 조회
-  // → 각 Mission의 Interview 목록 조회
-  // → IN_PROGRESS 우선
-  // → 없으면 CREATED
-  //
-  // COMPLETED / CANCELLED만 존재하는 Mission은
-  // Dashboard "진행 중인 미션"에서는 제외
+  // Mission 목록 + 진행 중 Interview 조회
   // ============================================================
 
   useEffect(() => {
-    const fetchActiveMissions = async () => {
+    const fetchDashboardData = async () => {
       try {
         setActiveMissionsLoading(true);
         setActiveMissionsError("");
 
         const missionData = await getMissions();
+
+        // KPI 조회에서도 사용
+        setAllMissions(missionData.missions);
 
         const results = await Promise.all(
           missionData.missions.map(async (mission) => {
@@ -80,6 +105,7 @@ export default function DashboardPage() {
                   new Date(a.created_at).getTime()
               );
 
+              // 진행 중 Interview 우선
               const selectedInterview =
                 sortedInterviews.find(
                   (interview) =>
@@ -134,14 +160,106 @@ export default function DashboardPage() {
       }
     };
 
-    fetchActiveMissions();
+    void fetchDashboardData();
   }, []);
 
   // ============================================================
-  // 전체 시스템 기준 KPI 카드
+  // 전체 Mission 기준 KPI 조회
+  // Knowledge Unit / VERIFIED / Conflict
+  // ============================================================
+
+  useEffect(() => {
+    if (allMissions.length === 0) {
+      setRealSummary({
+        knowledgeUnits: 0,
+        verifiedKnowledge: 0,
+        conflicts: 0,
+      });
+
+      setSummaryLoading(false);
+      return;
+    }
+
+    const fetchSummary = async () => {
+      try {
+        setSummaryLoading(true);
+        setSummaryError("");
+
+        const results = await Promise.all(
+          allMissions.map(async (mission) => {
+            // Mission별 Unit / Conflict 동시 조회
+            const [knowledgeUnits, conflictData] =
+              await Promise.all([
+                getMissionKnowledgeUnits(
+                  mission.mission_id
+                ),
+                getMissionConflicts(
+                  mission.mission_id
+                ),
+              ]);
+
+            return {
+              knowledgeUnits,
+              conflicts: conflictData.total,
+            };
+          })
+        );
+
+        // 전체 Knowledge Unit
+        const allKnowledgeUnits =
+          results.flatMap(
+            (result) => result.knowledgeUnits
+          );
+
+        // VERIFIED 상태만 집계
+        const verifiedKnowledge =
+          allKnowledgeUnits.filter(
+            (unit: KnowledgeUnitResponse) =>
+              unit.status === "VERIFIED"
+          ).length;
+
+        // 전체 Conflict
+        const totalConflicts = results.reduce(
+          (sum, result) =>
+            sum + result.conflicts,
+          0
+        );
+
+        setRealSummary({
+          knowledgeUnits: allKnowledgeUnits.length,
+          verifiedKnowledge,
+          conflicts: totalConflicts,
+        });
+      } catch (error) {
+        console.error(
+          "DASHBOARD SUMMARY FETCH ERROR:",
+          error
+        );
+
+        setSummaryError(
+          error instanceof Error
+            ? error.message
+            : "Dashboard KPI를 불러오는 중 오류가 발생했습니다."
+        );
+      } finally {
+        setSummaryLoading(false);
+      }
+    };
+
+    void fetchSummary();
+  }, [allMissions]);
+
+  // ============================================================
+  // Dashboard KPI
   //
-  // 진행 중 Mission 숫자만 실제 조회 결과 사용.
-  // 나머지 KPI는 아직 기존 mock 유지.
+  // 실제:
+  // - 진행 중 Mission
+  // - Knowledge Unit
+  // - 검증 완료
+  // - Conflict
+  //
+  // 아직 Mock:
+  // - Knowledge Candidate
   // ============================================================
 
   const summaryCards = [
@@ -158,7 +276,8 @@ export default function DashboardPage() {
     },
     {
       label: "지식 후보",
-      value: dashboardData.summary.candidates,
+      // Mission 단위 Candidate 조회 API 확인 전
+      value: "-",
       unit: "개",
       icon: SearchCheck,
       iconBg: "bg-indigo-100",
@@ -167,7 +286,9 @@ export default function DashboardPage() {
     },
     {
       label: "지식 단위",
-      value: dashboardData.summary.knowledgeUnits,
+      value: summaryLoading
+        ? "-"
+        : realSummary.knowledgeUnits,
       unit: "개",
       icon: FileText,
       iconBg: "bg-violet-100",
@@ -176,7 +297,9 @@ export default function DashboardPage() {
     },
     {
       label: "검증 완료",
-      value: dashboardData.summary.verifiedKnowledge,
+      value: summaryLoading
+        ? "-"
+        : realSummary.verifiedKnowledge,
       unit: "개",
       icon: CircleCheckBig,
       iconBg: "bg-emerald-100",
@@ -185,7 +308,9 @@ export default function DashboardPage() {
     },
     {
       label: "갈등 이슈",
-      value: dashboardData.summary.conflicts,
+      value: summaryLoading
+        ? "-"
+        : realSummary.conflicts,
       unit: "건",
       icon: TriangleAlert,
       iconBg: "bg-rose-100",
@@ -194,6 +319,7 @@ export default function DashboardPage() {
     },
   ];
 
+  // Interview 상태 표시
   const getInterviewStatusLabel = (
     interview: InterviewResponse
   ) => {
@@ -211,7 +337,7 @@ export default function DashboardPage() {
   return (
     <div className="bg-[#F8FAFC] px-3 pb-2 pt-1 text-slate-900 sm:px-4 lg:px-5">
       <div className="mx-auto max-w-[1600px] space-y-3">
-        {/* Dashboard 화면 제목 */}
+        {/* Dashboard 제목 */}
         <header className="px-1">
           <div className="space-y-0.5">
             <h1 className="text-3xl font-black tracking-tighter text-slate-900 sm:text-4xl lg:text-5xl">
@@ -284,6 +410,15 @@ export default function DashboardPage() {
             })}
           </div>
         </section>
+
+        {/* KPI 오류 */}
+        {summaryError && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+            <p className="text-sm font-semibold text-rose-600">
+              {summaryError}
+            </p>
+          </div>
+        )}
 
         {/* 진행 중인 Mission */}
         <section className="space-y-3">
@@ -403,7 +538,7 @@ export default function DashboardPage() {
                         </div>
                       </div>
 
-                      {/* Coverage는 아직 실제 API 미연동 */}
+                      {/* Coverage는 아직 API 미연동 */}
                       <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
                         <div className="flex items-center justify-between gap-3">
                           <div>
