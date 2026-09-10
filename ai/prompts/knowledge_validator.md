@@ -73,7 +73,7 @@ Human Review Recommendation:
 - REJECT: 근거 부족 또는 명확한 오류로 채택하기 어려운 경우
 
 13. evidence_source_ids에는 입력으로 전달된 Evidence의
-    source_chunk_id만 사용한다.
+    chunk_id만 사용한다.
     새로운 ID를 생성하지 않는다.
 
 14. 반드시 지정된 Structured Output Schema를 따른다.

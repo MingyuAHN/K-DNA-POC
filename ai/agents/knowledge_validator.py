@@ -27,12 +27,12 @@ class KnowledgeValidator:
     ) -> KnowledgeValidationResponse:
 
         evidence = [
-            item.model_dump()
+            item.model_dump(mode="json")
             for item in request.evidence
         ]
 
         related_knowledge = [
-            item.model_dump()
+            item.model_dump(mode="json")
             for item in request.related_knowledge
         ]
 
@@ -85,12 +85,12 @@ class KnowledgeValidator:
 
         # LLM이 임의 Evidence ID를 만들지 못하도록 검증
         valid_source_ids = {
-            evidence.source_chunk_id
-            for evidence in request.evidence
+            str(item.chunk_id)
+            for item in request.evidence
         }
 
         for source_id in result.evidence_source_ids:
-            if source_id not in valid_source_ids:
+            if str(source_id) not in valid_source_ids:
                 raise ValueError(
                     "Validation result contains unknown evidence ID: "
                     f"{source_id}"

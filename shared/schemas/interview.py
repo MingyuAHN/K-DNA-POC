@@ -1,4 +1,5 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
+from uuid import UUID
 from pydantic import BaseModel, Field
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .common import ContextTags
@@ -32,20 +33,56 @@ class ConversationMessage(BaseModel):
     content: str
 
 
+BaselineRetrievedClaimType = Literal[
+    "PRINCIPLE",
+    "DECISION",
+    "EXCEPTION",
+    "OUTCOME",
+]
+
+
 class RetrievedKnowledge(BaseModel):
-    knowledge_id: str
+    model_config = ConfigDict(
+        extra="forbid"
+    )
+
+    claim_id: UUID
+    claim_type: BaselineRetrievedClaimType
     statement: str
-    type: KnowledgeType
-    context: ContextTags
-    confidence_score: Optional[float] = None
+
+    similarity: float
+
+    source_chunk_id: UUID
+    document_id: UUID
+    file_name: str
+
+    page: Optional[int] = None
+    section: Optional[str] = None
+
+    context: ContextTags = Field(
+        default_factory=ContextTags
+    )
 
 
 class RetrievedEvidence(BaseModel):
-    source_chunk_id: str
-    source: str
+    model_config = ConfigDict(
+        extra="forbid"
+    )
+
+    chunk_id: UUID
     content: str
-    context: ContextTags
-    relevance_score: Optional[float] = None
+
+    similarity: float
+
+    document_id: UUID
+    file_name: str
+
+    page: Optional[int] = None
+    section: Optional[str] = None
+
+    context: ContextTags = Field(
+        default_factory=ContextTags
+    )
 
 
 # backend가 ai orchestrator에게 넘길 최상위 input 

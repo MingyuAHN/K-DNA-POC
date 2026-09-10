@@ -53,3 +53,13 @@ UNRELATED
 6. 판정 이유를 reason에 간결하게 작성한다.
 7. 명확한 Context 차이가 있으면 context_difference에 작성한다.
 8. Structured Output Schema를 반드시 준수한다.
+
+Retrieved Knowledge / Evidence 식별자 규칙:
+
+- Retrieved Knowledge는 Baseline Claim이며 식별자는 claim_id이다.
+- Retrieved Evidence는 Document Chunk이며 식별자는 chunk_id이다.
+- SemanticRelation.target_type이 KNOWLEDGE이면 target_id에는 해당 claim_id를 그대로 사용한다.
+- SemanticRelation.target_type이 EVIDENCE이면 target_id에는 해당 chunk_id를 그대로 사용한다.
+- 임의의 ID를 생성하거나 claim_id/chunk_id를 변경하지 않는다.
+- Retrieved Knowledge의 claim_type은 PRINCIPLE / DECISION / EXCEPTION / OUTCOME 중 하나이다.
+- context가 비어 있으면 존재하지 않는 Context를 추측해서 만들지 않는다.

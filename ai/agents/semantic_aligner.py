@@ -23,12 +23,12 @@ class SemanticAligner:
         candidate = request.candidate
 
         knowledge_data = [
-            knowledge.model_dump()
+            knowledge.model_dump(mode="json")
             for knowledge in request.retrieved_knowledge
         ]
 
         evidence_data = [
-            evidence.model_dump()
+            evidence.model_dump(mode="json")
             for evidence in request.retrieved_evidence
         ]
 

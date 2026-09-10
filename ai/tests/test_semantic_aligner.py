@@ -21,7 +21,7 @@ class StubLLMGateway:
             "relations": [
                 {
                     "target_type": "EVIDENCE",
-                    "target_id": "chunk-adr021-001",
+                    "target_id": "22222222-2222-4222-8222-222222222222",
                     "relation": "CONTEXT_DIFFERS",
                     "reason": (
                         "Candidate는 일반적인 Database per Service "
@@ -55,19 +55,22 @@ def test_semantic_aligner():
     )
 
     evidence = RetrievedEvidence(
-        source_chunk_id="chunk-adr021-001",
-        source="ADR-021",
+        chunk_id="22222222-2222-4222-8222-222222222222",
         content=(
             "Migration Phase 1에서는 Order와 Inventory가 "
             "Shared Physical Database를 사용하고 "
             "Logical Separation을 적용한다."
         ),
+        similarity=0.95,
+        document_id="33333333-3333-4333-8333-333333333333",
+        file_name="ADR-021.md",
+        page=3,
+        section="Database Migration Strategy",
         context=ContextTags(
             project="Project Alpha",
             phase="Migration Phase 1",
             domain="Data Ownership",
         ),
-        relevance_score=0.95,
     )
 
     request = SemanticAlignmentRequest(
@@ -90,4 +93,4 @@ def test_semantic_aligner():
 
     assert relation.target_type.value == "EVIDENCE"
 
-    assert relation.target_id == "chunk-adr021-001"
+    assert relation.target_id == "22222222-2222-4222-8222-222222222222"

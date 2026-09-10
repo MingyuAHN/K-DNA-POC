@@ -43,6 +43,15 @@ CONDITIONAL_CONFLICT는 Context 차이 자체보다
 "어떤 조건에서 원칙이 달라지는가?"를 추가로 밝혀야 하는 경우에 사용한다.
 
 
+Retrieved Knowledge / Evidence 출처 규칙:
+
+- Retrieved Knowledge의 식별자는 claim_id이다.
+- Retrieved Evidence의 식별자는 chunk_id이다.
+- ConflictSource.source_id에는 실제 비교 대상의 claim_id 또는 chunk_id를 그대로 사용한다.
+- Retrieved Knowledge를 Conflict Source로 사용할 경우 source_type은 "Knowledge"로 사용한다.
+- Retrieved Evidence를 Conflict Source로 사용할 경우 source_type은 "Evidence"로 사용한다.
+- 임의의 source_id를 생성하지 않는다.
+
 중요:
 
 - Conflict를 발견했다고 누가 맞고 틀린지 결정하지 않는다.
