@@ -1,24 +1,40 @@
 import json
 from pathlib import Path
+from uuid import UUID
+
+import pytest
+from pydantic import ValidationError
 
 from shared.schemas.seed import (
     BaselineClaimExtractionRequest,
 )
-
 from ai.agents.baseline_claim_extractor import (
     BaselineClaimExtractor,
 )
 
 
+REQUEST_CHUNK_ID = UUID(
+    "550e8400-e29b-41d4-a716-446655440000"
+)
+
+TEMP_LLM_CHUNK_ID = (
+    "00000000-0000-0000-0000-000000000001"
+)
+
+
 class StubLLMGateway:
+
     def generate_structured(
         self,
         system_prompt,
         user_prompt,
         response_model,
     ):
+        # LLM이 다른 "유효한 UUID"를 반환해도 Extractor가
+        # 실제 Request chunk_id로 최종 보정하는지 확인한다.
         mock_result = {
-            "chunk_id": "temporary-chunk-id",
+            "schema_version": "1.0",
+            "chunk_id": TEMP_LLM_CHUNK_ID,
             "claims": [
                 {
                     "statement": (
@@ -29,17 +45,22 @@ class StubLLMGateway:
                     "context": {
                         "project": "Project Alpha",
                         "phase": "Migration Phase 1",
-                        "domain": "Data Ownership"
+                        "domain": "Data Ownership",
+                        "system": "Order/Inventory",
+                        "scope": None,
+                        "time": None,
+                        "constraints": [],
+                        "tags": [],
                     },
-                    "source_chunk_id": "temporary-chunk-id",
+                    "source_chunk_id": TEMP_LLM_CHUNK_ID,
                     "source_text": (
                         "Migration Phase 1에서는 Order와 Inventory가 "
                         "Shared Physical Database를 사용하고 "
                         "Schema 수준에서 Logical Separation을 적용한다."
                     ),
-                    "confidence_score": 0.95
+                    "confidence_score": 0.95,
                 }
-            ]
+            ],
         }
 
         return response_model.model_validate(
@@ -47,30 +68,108 @@ class StubLLMGateway:
         )
 
 
-def test_baseline_claim_extractor():
-
+def _fixture_data():
     fixture_path = (
         Path(__file__).resolve().parents[1]
         / "fixtures"
         / "adr021_chunk.json"
     )
 
-    data = json.loads(
+    return json.loads(
         fixture_path.read_text(
             encoding="utf-8"
         )
     )
 
-    # Backend → AI 최종 Request Schema
-    #
-    # {
-    #   "chunk_id": "...",
-    #   "content": "...",
-    #   "source": "...",
-    #   "context": {...}
-    # }
-    request = BaselineClaimExtractionRequest.model_validate(
-        data
+
+def test_baseline_request_v1_contract():
+    request = (
+        BaselineClaimExtractionRequest.model_validate(
+            _fixture_data()
+        )
+    )
+
+    assert request.schema_version == "1.0"
+    assert request.chunk_id == REQUEST_CHUNK_ID
+
+    assert request.source.file_name == "ADR-021.md"
+    assert request.source.page == 3
+    assert (
+        request.source.section
+        == "Database Migration Strategy"
+    )
+
+    assert request.context.domain == "Data Ownership"
+    assert request.context.project == "Project Alpha"
+    assert request.context.phase == "Migration Phase 1"
+
+
+def test_context_optional_fields_and_list_defaults():
+    request = (
+        BaselineClaimExtractionRequest.model_validate(
+            {
+                "schema_version": "1.0",
+                "chunk_id": str(REQUEST_CHUNK_ID),
+                "content": "테스트 문서 내용",
+                "source": {
+                    "file_name": "sample.txt"
+                },
+                "context": {},
+            }
+        )
+    )
+
+    assert request.source.page is None
+    assert request.source.section is None
+
+    assert request.context.domain is None
+    assert request.context.project is None
+    assert request.context.phase is None
+    assert request.context.system is None
+    assert request.context.scope is None
+    assert request.context.time is None
+
+    assert request.context.constraints == []
+    assert request.context.tags == []
+
+
+def test_context_objective_is_rejected():
+    data = _fixture_data()
+    data["context"]["objective"] = (
+        "이 필드는 ContextTags에 포함되지 않는다."
+    )
+
+    with pytest.raises(ValidationError):
+        BaselineClaimExtractionRequest.model_validate(
+            data
+        )
+
+
+def test_source_string_is_rejected():
+    data = _fixture_data()
+    data["source"] = "ADR-021"
+
+    with pytest.raises(ValidationError):
+        BaselineClaimExtractionRequest.model_validate(
+            data
+        )
+
+
+def test_invalid_chunk_id_is_rejected():
+    data = _fixture_data()
+    data["chunk_id"] = "chunk-adr021-001"
+
+    with pytest.raises(ValidationError):
+        BaselineClaimExtractionRequest.model_validate(
+            data
+        )
+
+
+def test_baseline_claim_extractor_v1_echo_contract():
+    request = (
+        BaselineClaimExtractionRequest.model_validate(
+            _fixture_data()
+        )
     )
 
     extractor = BaselineClaimExtractor(
@@ -81,45 +180,20 @@ def test_baseline_claim_extractor():
         request
     )
 
-    # Response 최상위 chunk_id 확인
-    assert (
-        result.chunk_id
-        == "chunk-adr021-001"
-    )
+    assert result.schema_version == "1.0"
+    assert result.chunk_id == REQUEST_CHUNK_ID
 
-    # Claim이 정상 생성됐는지 확인
     assert len(result.claims) == 1
-
     claim = result.claims[0]
 
-    # 기존 type → claim_type
-    assert (
-        claim.claim_type.value
-        == "FACT"
-    )
+    assert claim.claim_type.value == "FACT"
 
-    # LLM이 temporary ID를 반환해도
-    # Extractor가 실제 Request의 chunk_id로 보정해야 함
-    assert (
-        claim.source_chunk_id
-        == "chunk-adr021-001"
-    )
+    # LLM이 임시 UUID를 반환해도 실제 Request UUID로 보정
+    assert claim.source_chunk_id == REQUEST_CHUNK_ID
 
-    # 기존 confidence → confidence_score
-    assert (
-        claim.confidence_score
-        == 0.95
-    )
-
-    assert (
-        claim.context.phase
-        == "Migration Phase 1"
-    )
-
-    assert (
-        claim.context.domain
-        == "Data Ownership"
-    )
+    assert claim.confidence_score == 0.95
+    assert claim.context.phase == "Migration Phase 1"
+    assert claim.context.domain == "Data Ownership"
 
     assert (
         "Shared Physical Database"

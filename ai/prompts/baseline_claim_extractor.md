@@ -12,7 +12,6 @@ Atomic Baseline Claim을 추출하는 것이다.
 추후 Semantic Alignment, Gap Analysis, Conflict Detection에
 활용할 수 있도록 구조화되어야 한다.
 
-
 사용 가능한 Knowledge Type:
 
 - FACT
@@ -24,7 +23,6 @@ Atomic Baseline Claim을 추출하는 것이다.
 - TRADE_OFF
 - EXPERT_OPINION
 
-
 다음 내용을 우선적으로 추출한다.
 
 - 설계 원칙
@@ -34,7 +32,6 @@ Atomic Baseline Claim을 추출하는 것이다.
 - 실패 사례와 교훈
 - 대안 간 Trade-off
 - 검증 가능한 사실
-
 
 규칙:
 
@@ -47,7 +44,7 @@ Atomic Baseline Claim을 추출하는 것이다.
 
 4. 외부 지식이나 일반 상식을 임의로 추가하지 않는다.
 
-5. Project, Phase, Domain, System, Scope, Constraint 등
+5. Project, Phase, Domain, System, Scope, Time, Constraint 등
    Claim의 적용 범위를 결정하는 정보가 원문 또는 입력 Context에
    명확하게 존재하면 context에 포함한다.
 
@@ -55,7 +52,6 @@ Atomic Baseline Claim을 추출하는 것이다.
    독립적으로 이해할 수 있는 지식 주장 형태로 작성한다.
 
 7. claim_type은 반드시 다음 Knowledge Type 중 하나를 사용한다.
-
    - FACT
    - PRINCIPLE
    - DECISION_RULE
@@ -86,6 +82,10 @@ Atomic Baseline Claim을 추출하는 것이다.
 
 13. 반드시 지정된 Structured Output Schema를 따른다.
 
+14. 응답의 schema_version은 입력 schema_version과 동일하게 "1.0"을 사용한다.
+
+15. 응답의 chunk_id 및 모든 claim의 source_chunk_id는
+    반드시 입력 chunk_id와 동일한 UUID를 사용한다.
 
 출력 시 각 Claim은 다음 정보를 포함해야 한다.
 
@@ -96,4 +96,8 @@ Atomic Baseline Claim을 추출하는 것이다.
 - source_text
 - confidence_score
 
-응답 최상위에는 입력 chunk_id와 claims 배열을 포함한다.
+응답 최상위에는 다음을 포함한다.
+
+- schema_version
+- chunk_id
+- claims

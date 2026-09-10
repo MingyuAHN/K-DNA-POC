@@ -23,17 +23,26 @@ class BaselineClaimExtractor:
         user_prompt = f"""
 다음 Document Chunk에서 Atomic Baseline Claim을 추출하세요.
 
+schema_version:
+{request.schema_version}
+
 chunk_id:
 {request.chunk_id}
 
 source:
-{request.source}
+{request.source.model_dump_json(indent=2)}
 
 context:
 {request.context.model_dump_json(indent=2)}
 
 content:
 {request.content}
+
+중요:
+- 응답 schema_version은 입력 schema_version과 동일하게 사용하세요.
+- 응답 chunk_id는 입력 chunk_id와 동일하게 사용하세요.
+- 각 claim의 source_chunk_id는 입력 chunk_id와 동일하게 사용하세요.
+- 새로운 시스템 ID를 생성하지 마세요.
 """
 
         result = self.llm.generate_structured(
@@ -42,7 +51,8 @@ content:
             response_model=BaselineClaimExtractionResponse,
         )
 
-        # 시스템 관리 ID는 LLM 생성값을 신뢰하지 않고 입력값으로 보정
+        # 시스템 관리 값은 LLM 결과를 신뢰하지 않고 Request 값으로 최종 보정
+        result.schema_version = request.schema_version
         result.chunk_id = request.chunk_id
 
         for claim in result.claims:
