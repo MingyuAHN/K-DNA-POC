@@ -25,6 +25,13 @@ SynthesisRelationType = Literal[
 ]
 
 
+AutoKnowledgeSyncItemStatus = Literal[
+    "APPLIED",
+    "SKIPPED",
+    "FAILED",
+]
+
+
 class SynthesisContext(BaseModel):
     project: str | None = None
     phase: str | None = None
@@ -225,3 +232,43 @@ class KnowledgeSynthesisResponse(BaseModel):
     ]
 
     reason: str | None
+
+
+# ---------------------------------------------------------
+# Auto Knowledge Sync
+# ---------------------------------------------------------
+
+
+class AutoKnowledgeSyncItem(BaseModel):
+    candidate_id: uuid.UUID
+
+    status: AutoKnowledgeSyncItemStatus
+
+    synthesis_id: (
+        uuid.UUID | None
+    ) = None
+
+    resulting_knowledge_ids: list[
+        uuid.UUID
+    ] = Field(
+        default_factory=list
+    )
+
+    detail: str | None = None
+
+
+class AutoKnowledgeSyncResponse(BaseModel):
+    analysis_id: uuid.UUID
+    mission_id: uuid.UUID
+
+    total_candidates: int
+
+    processed: int
+    skipped: int
+    failed: int
+
+    items: list[
+        AutoKnowledgeSyncItem
+    ] = Field(
+        default_factory=list
+    )
