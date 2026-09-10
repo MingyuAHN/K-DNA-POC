@@ -336,6 +336,11 @@ def validate_and_apply_synthesis(
 
     # ------------------------------------------------------
     # REJECT
+    #
+    # Candidate 자체 상태는 변경하지 않는다.
+    #
+    # Auto Guardrail이 Synthesis만 REJECT한 뒤
+    # 안전한 Context로 재-Synthesis할 수 있기 때문이다.
     # ------------------------------------------------------
     if request.decision == "REJECT":
 
@@ -422,8 +427,6 @@ def validate_and_apply_synthesis(
 
         # --------------------------------------------------
         # ENRICH / SUPERSEDE
-        #
-        # 기존 Knowledge의 새 Version으로 생성
         # --------------------------------------------------
         if synthesis.operation in {
             "ENRICH",
@@ -514,8 +517,6 @@ def validate_and_apply_synthesis(
 
         # --------------------------------------------------
         # MERGE
-        #
-        # 새 Knowledge를 만들고 기존 Target들을 대체
         # --------------------------------------------------
         elif synthesis.operation == "MERGE":
 
@@ -567,7 +568,11 @@ def validate_and_apply_synthesis(
         # SPLIT_BY_CONTEXT
         # KEEP_CONFLICT
         #
-        # 기존 Knowledge를 유지하고 새 Knowledge 생성
+        # Manual Apply API에서는 기존 동작 유지.
+        #
+        # Auto Pipeline에서의 허용/차단 여부는
+        # auto_knowledge_sync_service의 Guardrail이
+        # 결정한다.
         # --------------------------------------------------
         else:
 
@@ -584,7 +589,7 @@ def validate_and_apply_synthesis(
                 ] = knowledge
 
         # --------------------------------------------------
-        # AI가 제안한 Relations 적용
+        # AI 제안 Relation 적용
         # --------------------------------------------------
         proposed_relations = (
             db.query(
@@ -633,6 +638,7 @@ def validate_and_apply_synthesis(
                 proposal_relation.relation_type
                 == "HAS_EXCEPTION"
             ):
+
                 source_id = target_id
 
                 relation_target_id = (
@@ -640,6 +646,7 @@ def validate_and_apply_synthesis(
                 )
 
             else:
+
                 source_id = (
                     synthesized.knowledge_id
                 )
@@ -669,7 +676,7 @@ def validate_and_apply_synthesis(
             )
 
         # --------------------------------------------------
-        # Evidence 연결
+        # Evidence
         # --------------------------------------------------
         for knowledge in (
             applied_map.values()
@@ -690,7 +697,17 @@ def validate_and_apply_synthesis(
         ]
 
         # --------------------------------------------------
-        # Synthesis 완료 처리
+        # Candidate 승격 상태 동기화
+        #
+        # 실제 Knowledge Unit까지 적용된 Candidate는
+        # 더 이상 CANDIDATE 상태로 남기지 않는다.
+        # --------------------------------------------------
+        candidate.validation_status = (
+            "VERIFIED"
+        )
+
+        # --------------------------------------------------
+        # Synthesis 완료
         # --------------------------------------------------
         synthesis.status = "APPLIED"
 
@@ -703,6 +720,7 @@ def validate_and_apply_synthesis(
 
         db.commit()
         db.refresh(synthesis)
+        db.refresh(candidate)
 
         knowledge_units = [
             AppliedKnowledgeUnit(

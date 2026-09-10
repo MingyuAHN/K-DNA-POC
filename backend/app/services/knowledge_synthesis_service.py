@@ -121,6 +121,7 @@ def _get_related_knowledge(
     db: Session,
     mission_id: uuid.UUID,
     requested_ids: list[uuid.UUID],
+    use_mission_fallback: bool = True,
 ) -> list[KnowledgeUnit]:
 
     # ------------------------------------------------------
@@ -195,11 +196,19 @@ def _get_related_knowledge(
         return result
 
     # ------------------------------------------------------
-    # 별도 ID가 없으면 PoC 기준으로
-    # 같은 Mission의 활성 Knowledge 최대 20건 사용
+    # Auto Knowledge Sync 전용
     #
-    # 추후 Knowledge Unit Embedding이 붙으면
-    # Semantic Retrieval 방식으로 변경
+    # 선별된 관련 Knowledge가 실제로 0개라면
+    # Mission 전체 Knowledge를 fallback으로 넣지 않는다.
+    # ------------------------------------------------------
+    if not use_mission_fallback:
+        return []
+
+    # ------------------------------------------------------
+    # 기존 Swagger/manual synthesis 동작 유지
+    #
+    # 별도 ID가 없으면 같은 Mission의
+    # 활성 Knowledge 최대 20건 사용
     # ------------------------------------------------------
     return (
         db.query(KnowledgeUnit)
@@ -222,6 +231,7 @@ def synthesize_candidate(
     db: Session,
     candidate_id: uuid.UUID,
     request: KnowledgeSynthesisRequest,
+    use_mission_fallback: bool = True,
 ) -> KnowledgeSynthesisResponse:
 
     candidate = (
@@ -268,6 +278,9 @@ def synthesize_candidate(
             mission_id=analysis.mission_id,
             requested_ids=(
                 request.related_knowledge_ids
+            ),
+            use_mission_fallback=(
+                use_mission_fallback
             ),
         )
     )

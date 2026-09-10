@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any
 
@@ -15,6 +16,9 @@ from app.schemas.interview_orchestration import (
     InterviewTurnRequest,
     InterviewTurnResponse,
 )
+from app.services.auto_knowledge_sync_service import (
+    sync_analysis_to_knowledge,
+)
 from app.services.interview_analysis_service import (
     save_interview_analysis,
 )
@@ -25,6 +29,9 @@ from app.services.interview_service import (
     add_interview_message,
     get_interview,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_message_for_ai(
@@ -218,12 +225,114 @@ def run_interview_turn(
             }
 
             db.commit()
+
             db.refresh(
                 assistant_message
             )
 
         # -----------------------------------------------------
-        # 9. Frontend 응답
+        # 9. Auto Knowledge Sync
+        #
+        # 이번 Turn에서 생성된 Candidate들을 대상으로:
+        #
+        # Candidate
+        #   → 관련 Knowledge 선별
+        #   → Synthesis
+        #   → Guardrail
+        #   → Auto APPROVE
+        #   → Knowledge Unit / Relation / Version
+        #
+        # 을 자동 처리한다.
+        #
+        # 중요:
+        # Knowledge Sync 실패는 Interview Turn 자체를
+        # 실패시키지 않는다.
+        #
+        # 전문가의 답변 / 분석 / 다음 질문은 이미 DB에
+        # 저장됐으므로 DNA 후처리가 실패하더라도
+        # Interview는 계속 진행할 수 있어야 한다.
+        # -----------------------------------------------------
+        try:
+            knowledge_sync_result = (
+                sync_analysis_to_knowledge(
+                    db=db,
+                    analysis_id=(
+                        analysis.analysis_id
+                    ),
+                )
+            )
+
+            logger.info(
+                (
+                    "Auto knowledge sync completed "
+                    "analysis_id=%s "
+                    "mission_id=%s "
+                    "processed=%s "
+                    "skipped=%s "
+                    "review_required=%s "
+                    "failed=%s"
+                ),
+                analysis.analysis_id,
+                interview.mission_id,
+                knowledge_sync_result.processed,
+                knowledge_sync_result.skipped,
+                (
+                    knowledge_sync_result
+                    .review_required
+                ),
+                knowledge_sync_result.failed,
+            )
+
+            if (
+                knowledge_sync_result.failed > 0
+                or
+                knowledge_sync_result
+                .review_required > 0
+            ):
+                logger.warning(
+                    (
+                        "Auto knowledge sync "
+                        "completed with unresolved "
+                        "items analysis_id=%s "
+                        "review_required=%s "
+                        "failed=%s"
+                    ),
+                    analysis.analysis_id,
+                    (
+                        knowledge_sync_result
+                        .review_required
+                    ),
+                    knowledge_sync_result.failed,
+                )
+
+        except Exception as sync_exc:
+
+            # Auto Knowledge Sync 과정에서
+            # 열린 트랜잭션이 남아 있을 가능성에 대비한다.
+            db.rollback()
+
+            logger.exception(
+                (
+                    "Auto knowledge sync failed "
+                    "but interview turn will "
+                    "continue. "
+                    "analysis_id=%s "
+                    "interview_id=%s "
+                    "error=%s"
+                ),
+                analysis.analysis_id,
+                interview_id,
+                str(sync_exc),
+            )
+
+        # -----------------------------------------------------
+        # 10. Frontend 응답
+        #
+        # Knowledge Sync 결과는 현재 Turn Response Schema에
+        # 추가하지 않는다.
+        #
+        # /turns가 성공하면 Frontend는 기존
+        # knowledge-graph API를 다시 조회하면 된다.
         # -----------------------------------------------------
         return InterviewTurnResponse(
             analysis_id=analysis.analysis_id,

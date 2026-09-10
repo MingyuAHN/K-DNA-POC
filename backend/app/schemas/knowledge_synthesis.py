@@ -28,6 +28,7 @@ SynthesisRelationType = Literal[
 AutoKnowledgeSyncItemStatus = Literal[
     "APPLIED",
     "SKIPPED",
+    "REVIEW_REQUIRED",
     "FAILED",
 ]
 
@@ -165,15 +166,21 @@ class KnowledgeSynthesisAIResponse(BaseModel):
 
     target_knowledge_ids: list[
         uuid.UUID
-    ] = Field(default_factory=list)
+    ] = Field(
+        default_factory=list
+    )
 
     synthesized_knowledge_units: list[
         SynthesizedKnowledgeUnit
-    ] = Field(default_factory=list)
+    ] = Field(
+        default_factory=list
+    )
 
     relations: list[
         ProposedSynthesisRelation
-    ] = Field(default_factory=list)
+    ] = Field(
+        default_factory=list
+    )
 
     reason: str | None = None
 
@@ -265,6 +272,7 @@ class AutoKnowledgeSyncResponse(BaseModel):
 
     processed: int
     skipped: int
+    review_required: int
     failed: int
 
     items: list[
