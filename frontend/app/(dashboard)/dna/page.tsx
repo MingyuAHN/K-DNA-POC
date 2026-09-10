@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -287,7 +288,6 @@ function KnowledgeGraphCard({
 
    - REFINES: 보라색 직선
    - SUPERSEDES: 회색 점선 곡선
-   - Relation Label은 노드보다 위에 표시
 ============================================================ */
 
 function KnowledgeRelationEdge({
@@ -313,17 +313,12 @@ function KnowledgeRelationEdge({
   const isRefines =
     relationType === "REFINES";
 
-  /* 두 노드 사이 중앙 좌표 */
   const middleX =
     (sourceX + targetX) / 2;
 
   const middleY =
     (sourceY + targetY) / 2;
 
-  /*
-   * REFINES는 가운데 직선
-   * SUPERSEDES는 아래쪽 곡선으로 분리
-   */
   const edgePath =
     isSupersedes
       ? `M ${sourceX} ${sourceY}
@@ -333,7 +328,6 @@ function KnowledgeRelationEdge({
       : `M ${sourceX} ${sourceY}
          L ${targetX} ${targetY}`;
 
-  /* 관계별 선 색상 */
   const stroke =
     isRefines
       ? "#7C3AED"
@@ -341,11 +335,6 @@ function KnowledgeRelationEdge({
         ? "#94A3B8"
         : "#CBD5E1";
 
-  /*
-   * 관계명 위치
-   * REFINES는 직선 위
-   * SUPERSEDES는 곡선 아래
-   */
   const labelY =
     isSupersedes
       ? middleY + 42
@@ -353,7 +342,6 @@ function KnowledgeRelationEdge({
 
   return (
     <>
-      {/* 관계선 */}
       <BaseEdge
         id={id}
         path={edgePath}
@@ -361,7 +349,6 @@ function KnowledgeRelationEdge({
         style={{
           stroke,
           strokeWidth: 2.4,
-
           strokeDasharray:
             isSupersedes
               ? "7 5"
@@ -369,7 +356,6 @@ function KnowledgeRelationEdge({
         }}
       />
 
-      {/* 관계명 */}
       <EdgeLabelRenderer>
         <div
           className={`
@@ -383,7 +369,6 @@ function KnowledgeRelationEdge({
             text-[10px]
             font-black
             shadow-sm
-
             ${
               isRefines
                 ? "border-violet-200 text-violet-700"
@@ -391,11 +376,6 @@ function KnowledgeRelationEdge({
             }
           `}
           style={{
-            /*
-             * 중요:
-             * Relation Label이 Node 카드 뒤로
-             * 들어가지 않도록 위쪽 Layer 사용
-             */
             zIndex: 1000,
 
             transform: `
@@ -423,17 +403,19 @@ const edgeTypes = {
 
 
 /* ============================================================
-   Page
+   DNA 실제 화면
+
+   useSearchParams는 이 컴포넌트 안에서 사용하고
+   바깥 Page에서 Suspense로 감싼다.
 ============================================================ */
 
-export default function DnaPage() {
+function DnaPageContent() {
   /* Mission 페이지에서 전달된 Mission ID */
   const searchParams =
     useSearchParams();
 
   const missionId =
     searchParams.get("missionId");
-
 
   const [mission, setMission] =
     useState<MissionResponse | null>(
@@ -996,6 +978,34 @@ export default function DnaPage() {
 
       </div>
     </div>
+  );
+}
+
+
+/* ============================================================
+   Page
+
+   Vercel Production Build에서 useSearchParams를 사용하기 위해
+   실제 화면을 Suspense Boundary로 감싼다.
+============================================================ */
+
+export default function DnaPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
+          <div className="mx-auto max-w-[1500px]">
+            <section className="rounded-[24px] border border-slate-200 bg-white p-10 text-center shadow-sm">
+              <p className="text-sm font-semibold text-slate-400">
+                Knowledge DNA를 불러오는 중입니다.
+              </p>
+            </section>
+          </div>
+        </div>
+      }
+    >
+      <DnaPageContent />
+    </Suspense>
   );
 }
 

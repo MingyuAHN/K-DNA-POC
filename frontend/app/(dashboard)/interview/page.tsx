@@ -1,7 +1,15 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  FormEvent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+
 import { useSearchParams } from "next/navigation";
+
 import {
   AlertTriangle,
   ArrowUp,
@@ -17,8 +25,14 @@ import {
   Square,
   UserRound,
 } from "lucide-react";
+
 import { interviewMock } from "@/mocks/interviewMock";
-import { getMission, type MissionResponse } from "@/services/mission";
+
+import {
+  getMission,
+  type MissionResponse,
+} from "@/services/mission";
+
 import {
   completeInterview,
   getInterviewMessages,
@@ -27,6 +41,11 @@ import {
   type InterviewTurnResponse,
 } from "@/services/interview";
 
+
+/* ============================================================
+   Coverage 아이콘
+============================================================ */
+
 const coverageIconMap = {
   layers: Layers3,
   database: Database,
@@ -34,6 +53,11 @@ const coverageIconMap = {
   alert: CircleAlert,
   warning: AlertTriangle,
 };
+
+
+/* ============================================================
+   메시지 시간 표시
+============================================================ */
 
 function formatMessageTime(createdAt: string) {
   const date = new Date(createdAt);
@@ -49,7 +73,15 @@ function formatMessageTime(createdAt: string) {
   });
 }
 
-export default function InterviewPage() {
+
+/* ============================================================
+   Interview 실제 화면
+
+   useSearchParams는 이 컴포넌트 안에서 사용하고
+   바깥 Page에서 Suspense로 감싼다.
+============================================================ */
+
+function InterviewPageContent() {
   const searchParams = useSearchParams();
 
   const missionId = searchParams.get("missionId");
@@ -66,24 +98,40 @@ export default function InterviewPage() {
     useState<InterviewTurnResponse | null>(null);
 
   // Mission 조회 상태
-  const [mission, setMission] = useState<MissionResponse | null>(null);
-  const [missionLoading, setMissionLoading] = useState(true);
-  const [missionError, setMissionError] = useState("");
+  const [mission, setMission] =
+    useState<MissionResponse | null>(null);
+
+  const [missionLoading, setMissionLoading] =
+    useState(true);
+
+  const [missionError, setMissionError] =
+    useState("");
 
   // Interview 메시지 조회 / 전송 상태
-  const [messagesLoading, setMessagesLoading] = useState(true);
-  const [messageError, setMessageError] = useState("");
-  const [isSending, setIsSending] = useState(false);
+  const [messagesLoading, setMessagesLoading] =
+    useState(true);
+
+  const [messageError, setMessageError] =
+    useState("");
+
+  const [isSending, setIsSending] =
+    useState(false);
 
   // Interview 종료 상태
   const [isInterviewCompleted, setIsInterviewCompleted] =
     useState(false);
-  const [isCompleting, setIsCompleting] = useState(false);
 
-  // Coverage는 아직 실제 API 미연동 영역
+  const [isCompleting, setIsCompleting] =
+    useState(false);
+
+  // Coverage는 아직 실제 API 미연동
   const coverageItems = interviewMock.coverageItems;
 
-  // URL의 missionId 기준 실제 Mission 조회
+
+  /* ==========================================================
+     Mission 조회
+  ========================================================== */
+
   useEffect(() => {
     const fetchMission = async () => {
       if (!missionId) {
@@ -96,11 +144,15 @@ export default function InterviewPage() {
         setMissionLoading(true);
         setMissionError("");
 
-        const data = await getMission(missionId);
+        const data =
+          await getMission(missionId);
 
         setMission(data);
       } catch (error) {
-        console.error("MISSION FETCH ERROR:", error);
+        console.error(
+          "MISSION FETCH ERROR:",
+          error
+        );
 
         setMissionError(
           error instanceof Error
@@ -112,46 +164,68 @@ export default function InterviewPage() {
       }
     };
 
-    fetchMission();
+    void fetchMission();
   }, [missionId]);
 
-  // Interview 대화 이력 조회
-  const fetchMessages = useCallback(async () => {
-    if (!interviewId) {
-      setMessageError("Interview ID가 없습니다.");
-      setMessagesLoading(false);
-      return;
-    }
 
-    try {
-      setMessagesLoading(true);
-      setMessageError("");
+  /* ==========================================================
+     Interview 대화 이력 조회
+  ========================================================== */
 
-      const data = await getInterviewMessages(interviewId);
+  const fetchMessages =
+    useCallback(async () => {
+      if (!interviewId) {
+        setMessageError(
+          "Interview ID가 없습니다."
+        );
 
-      setMessages(data.messages);
-    } catch (error) {
-      console.error("INTERVIEW MESSAGES FETCH ERROR:", error);
+        setMessagesLoading(false);
+        return;
+      }
 
-      setMessageError(
-        error instanceof Error
-          ? error.message
-          : "인터뷰 대화 이력을 불러오는 중 오류가 발생했습니다."
-      );
-    } finally {
-      setMessagesLoading(false);
-    }
-  }, [interviewId]);
+      try {
+        setMessagesLoading(true);
+        setMessageError("");
+
+        const data =
+          await getInterviewMessages(
+            interviewId
+          );
+
+        setMessages(data.messages);
+      } catch (error) {
+        console.error(
+          "INTERVIEW MESSAGES FETCH ERROR:",
+          error
+        );
+
+        setMessageError(
+          error instanceof Error
+            ? error.message
+            : "인터뷰 대화 이력을 불러오는 중 오류가 발생했습니다."
+        );
+      } finally {
+        setMessagesLoading(false);
+      }
+    }, [interviewId]);
+
 
   useEffect(() => {
-    fetchMessages();
+    void fetchMessages();
   }, [fetchMessages]);
 
-  // 전문가 답변 전송
-  const handleSubmit = async (event: FormEvent) => {
+
+  /* ==========================================================
+     전문가 답변 전송
+  ========================================================== */
+
+  const handleSubmit = async (
+    event: FormEvent
+  ) => {
     event.preventDefault();
 
-    const trimmedMessage = message.trim();
+    const trimmedMessage =
+      message.trim();
 
     if (
       !trimmedMessage ||
@@ -163,7 +237,10 @@ export default function InterviewPage() {
     }
 
     if (!interviewId) {
-      setMessageError("Interview ID가 없습니다.");
+      setMessageError(
+        "Interview ID가 없습니다."
+      );
+
       return;
     }
 
@@ -171,33 +248,44 @@ export default function InterviewPage() {
       setIsSending(true);
       setMessageError("");
 
-      // /turns 호출
-      // Backend에서:
-      // USER 저장
-      // → AI 분석
-      // → 필요 시 ASSISTANT 저장
-      // → 종료 조건 충족 시 Interview COMPLETED 처리
-      const turnResult = await processInterviewTurn(interviewId, {
-        content: trimmedMessage,
-      });
+      /*
+       * /turns 호출
+       * USER 저장
+       * → AI 분석
+       * → ASSISTANT 저장
+       * → 종료 조건 처리
+       */
+      const turnResult =
+        await processInterviewTurn(
+          interviewId,
+          {
+            content: trimmedMessage,
+          }
+        );
 
       // 최신 AI 분석 결과 저장
       setLatestTurn(turnResult);
 
-      // 성공 후 입력창 초기화
+      // 입력창 초기화
       setMessage("");
 
-      // AI가 더 이상 후속 질문을 만들지 않았거나
-      // Backend 최대 후속 질문 수에 도달한 경우
-      // Backend에서 이미 COMPLETED 처리된 상태
-      if (turnResult.next_question === null) {
-        setIsInterviewCompleted(true);
+      // 후속 질문이 없으면 종료 처리
+      if (
+        turnResult.next_question ===
+        null
+      ) {
+        setIsInterviewCompleted(
+          true
+        );
       }
 
-      // USER + ASSISTANT 메시지를 Backend 기준으로 다시 조회
+      // Backend 기준 메시지 재조회
       await fetchMessages();
     } catch (error) {
-      console.error("INTERVIEW TURN ERROR:", error);
+      console.error(
+        "INTERVIEW TURN ERROR:",
+        error
+      );
 
       const errorMessage =
         error instanceof Error
@@ -206,79 +294,117 @@ export default function InterviewPage() {
 
       setMessageError(errorMessage);
 
-      // 종료된 Interview에 /turns 호출 시 Backend가 409와 함께
-      // 해당 메시지를 반환하므로 화면 상태도 종료로 맞춘다.
-      if (errorMessage === "Interview is already completed") {
-        setIsInterviewCompleted(true);
+      if (
+        errorMessage ===
+        "Interview is already completed"
+      ) {
+        setIsInterviewCompleted(
+          true
+        );
       }
 
-      // /turns는 AI 호출 전에 USER 메시지를 저장할 수 있으므로
-      // 실패한 경우에도 Backend 메시지 상태를 다시 확인
+      // 실패해도 저장된 메시지 재조회
       await fetchMessages();
     } finally {
       setIsSending(false);
     }
   };
 
-  // 인터뷰 수동 종료
-  const handleEndInterview = async () => {
-    if (
-      !interviewId ||
-      isSending ||
-      isCompleting ||
-      isInterviewCompleted
-    ) {
-      return;
-    }
 
-    try {
-      setIsCompleting(true);
-      setMessageError("");
+  /* ==========================================================
+     인터뷰 수동 종료
+  ========================================================== */
 
-      const completedInterview = await completeInterview(interviewId);
-
-      if (completedInterview.status === "COMPLETED") {
-        setIsInterviewCompleted(true);
-        setMessage("");
+  const handleEndInterview =
+    async () => {
+      if (
+        !interviewId ||
+        isSending ||
+        isCompleting ||
+        isInterviewCompleted
+      ) {
+        return;
       }
-    } catch (error) {
-      console.error("INTERVIEW COMPLETE ERROR:", error);
 
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "인터뷰 종료 중 오류가 발생했습니다.";
+      try {
+        setIsCompleting(true);
+        setMessageError("");
 
-      setMessageError(errorMessage);
+        const completedInterview =
+          await completeInterview(
+            interviewId
+          );
 
-      if (errorMessage === "Interview is already completed") {
-        setIsInterviewCompleted(true);
+        if (
+          completedInterview.status ===
+          "COMPLETED"
+        ) {
+          setIsInterviewCompleted(
+            true
+          );
+
+          setMessage("");
+        }
+      } catch (error) {
+        console.error(
+          "INTERVIEW COMPLETE ERROR:",
+          error
+        );
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "인터뷰 종료 중 오류가 발생했습니다.";
+
+        setMessageError(
+          errorMessage
+        );
+
+        if (
+          errorMessage ===
+          "Interview is already completed"
+        ) {
+          setIsInterviewCompleted(
+            true
+          );
+        }
+      } finally {
+        setIsCompleting(false);
       }
-    } finally {
-      setIsCompleting(false);
-    }
-  };
+    };
 
-  // 최신 Turn에서 화면에 표시할 대표 데이터
+
+  /* ==========================================================
+     최신 Turn 대표 데이터
+  ========================================================== */
+
   const latestKnowledgeCandidate =
-    latestTurn?.knowledge_candidates[0] ?? null;
+    latestTurn?.knowledge_candidates[0] ??
+    null;
 
   const latestExceptionCandidate =
     latestTurn?.knowledge_candidates.find(
       (candidate) =>
-        candidate.type === "EXCEPTION" ||
-        Boolean(candidate.exception)
+        candidate.type ===
+          "EXCEPTION" ||
+        Boolean(
+          candidate.exception
+        )
     ) ?? null;
 
   const latestConflict =
-    latestTurn?.conflicts[0] ?? null;
+    latestTurn?.conflicts[0] ??
+    null;
 
   const latestGap =
-    latestTurn?.gaps[0] ?? null;
+    latestTurn?.gaps[0] ??
+    null;
+
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
       <div className="mx-auto max-w-[1600px] space-y-5">
+
         {/* 화면 제목 */}
         <header className="px-1">
           <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
@@ -291,8 +417,10 @@ export default function InterviewPage() {
           </p>
         </header>
 
+
         {/* 현재 Mission 정보 */}
         <section className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+
           <div>
             <p className="text-[11px] font-black uppercase tracking-[0.14em] text-blue-500">
               Current Mission
@@ -325,17 +453,22 @@ export default function InterviewPage() {
             ) : null}
           </div>
 
+
           {mission && (
             <div className="rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-600">
               {mission.status}
             </div>
           )}
+
         </section>
+
 
         {/* Interview 3단 구조 */}
         <div className="grid gap-4 xl:grid-cols-[250px_minmax(0,1fr)_310px]">
-          {/* 좌측: Topic별 Knowledge Coverage */}
+
+          {/* 좌측: Knowledge Coverage */}
           <aside className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+
             <div className="mb-5 flex items-center gap-2">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100">
                 <BookOpen className="h-5 w-5 text-blue-600" />
@@ -352,65 +485,85 @@ export default function InterviewPage() {
               </div>
             </div>
 
+
             <div className="space-y-4">
-              {coverageItems.map((item) => {
-                const Icon =
-                  coverageIconMap[
-                    item.iconType as keyof typeof coverageIconMap
-                  ];
+              {coverageItems.map(
+                (item) => {
+                  const Icon =
+                    coverageIconMap[
+                      item.iconType as keyof typeof coverageIconMap
+                    ];
 
-                const isLow = item.value < 30;
+                  const isLow =
+                    item.value < 30;
 
-                return (
-                  <div
-                    key={item.label}
-                    className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"
-                  >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Icon
-                          className={`h-4 w-4 shrink-0 ${
-                            isLow ? "text-rose-500" : "text-blue-500"
+                  return (
+                    <div
+                      key={item.label}
+                      className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-2">
+
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Icon
+                            className={`h-4 w-4 shrink-0 ${
+                              isLow
+                                ? "text-rose-500"
+                                : "text-blue-500"
+                            }`}
+                          />
+
+                          <span className="truncate text-xs font-bold text-slate-700">
+                            {item.label}
+                          </span>
+                        </div>
+
+
+                        <span
+                          className={`text-xs font-black ${
+                            isLow
+                              ? "text-rose-500"
+                              : "text-blue-600"
                           }`}
-                        />
-
-                        <span className="truncate text-xs font-bold text-slate-700">
-                          {item.label}
+                        >
+                          {item.value}%
                         </span>
+
                       </div>
 
-                      <span
-                        className={`text-xs font-black ${
-                          isLow ? "text-rose-500" : "text-blue-600"
-                        }`}
-                      >
-                        {item.value}%
-                      </span>
-                    </div>
 
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className={`h-full rounded-full ${
-                          isLow ? "bg-rose-500" : "bg-blue-500"
-                        }`}
-                        style={{
-                          width: `${item.value}%`,
-                        }}
-                      />
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className={`h-full rounded-full ${
+                            isLow
+                              ? "bg-rose-500"
+                              : "bg-blue-500"
+                          }`}
+                          style={{
+                            width: `${item.value}%`,
+                          }}
+                        />
+                      </div>
+
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                }
+              )}
             </div>
+
 
             <p className="mt-4 text-center text-[10px] font-semibold text-slate-400">
               Coverage API 연동 전 예시 데이터
             </p>
+
           </aside>
+
 
           {/* 중앙: AI ↔ Expert 대화 */}
           <main className="flex min-h-[650px] flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+
             <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100">
                 <MessageSquareText className="h-5 w-5 text-indigo-600" />
               </div>
@@ -424,18 +577,25 @@ export default function InterviewPage() {
                   AI ↔ Expert Conversation
                 </p>
               </div>
+
             </div>
 
+
+            {/* 대화 영역 */}
             <div className="flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-5">
+
               {messagesLoading ? (
                 <div className="flex h-full min-h-[300px] items-center justify-center">
                   <p className="text-sm font-semibold text-slate-400">
                     인터뷰 대화를 불러오는 중입니다.
                   </p>
                 </div>
-              ) : messages.length === 0 ? (
+              ) : messages.length ===
+                0 ? (
                 <div className="flex h-full min-h-[300px] items-center justify-center">
+
                   <div className="text-center">
+
                     <MessageSquareText className="mx-auto h-8 w-8 text-slate-300" />
 
                     <p className="mt-3 text-sm font-bold text-slate-500">
@@ -445,91 +605,139 @@ export default function InterviewPage() {
                     <p className="mt-1 text-xs font-medium text-slate-400">
                       전문가 답변을 입력하면 인터뷰가 시작됩니다.
                     </p>
+
                   </div>
+
                 </div>
               ) : (
-                messages.map((item) => {
-                  const isAI = item.role === "ASSISTANT";
-                  const isExpert = item.role === "USER";
-                  const isSystem = item.role === "SYSTEM";
+                messages.map(
+                  (item) => {
+                    const isAI =
+                      item.role ===
+                      "ASSISTANT";
 
-                  if (isSystem) {
+                    const isExpert =
+                      item.role ===
+                      "USER";
+
+                    const isSystem =
+                      item.role ===
+                      "SYSTEM";
+
+
+                    if (isSystem) {
+                      return (
+                        <div
+                          key={
+                            item.message_id
+                          }
+                          className="flex justify-center"
+                        >
+                          <div className="max-w-[85%] rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-center">
+
+                            <p className="text-[11px] font-bold text-slate-400">
+                              System ·{" "}
+                              {formatMessageTime(
+                                item.created_at
+                              )}
+                            </p>
+
+                            <p className="mt-1 whitespace-pre-wrap break-words text-xs font-medium text-slate-600">
+                              {item.content}
+                            </p>
+
+                          </div>
+                        </div>
+                      );
+                    }
+
+
                     return (
                       <div
-                        key={item.message_id}
-                        className="flex justify-center"
+                        key={
+                          item.message_id
+                        }
+                        className={`flex gap-3 ${
+                          isAI
+                            ? "justify-start"
+                            : "justify-end"
+                        }`}
                       >
-                        <div className="max-w-[85%] rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-center">
-                          <p className="text-[11px] font-bold text-slate-400">
-                            System · {formatMessageTime(item.created_at)}
-                          </p>
 
-                          <p className="mt-1 whitespace-pre-wrap break-words text-xs font-medium text-slate-600">
+                        {isAI && (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                            <Bot className="h-5 w-5" />
+                          </div>
+                        )}
+
+
+                        <div
+                          className={`max-w-[78%] ${
+                            isAI
+                              ? "text-left"
+                              : "text-right"
+                          }`}
+                        >
+
+                          <div className="mb-1 flex items-center gap-2">
+
+                            {!isAI && (
+                              <div className="flex-1" />
+                            )}
+
+                            <span className="text-[11px] font-bold text-slate-400">
+                              {isAI
+                                ? "K-DNA AI"
+                                : "Expert"}{" "}
+                              ·{" "}
+                              {formatMessageTime(
+                                item.created_at
+                              )}
+                            </span>
+
+                          </div>
+
+
+                          <div
+                            className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-left text-sm font-medium leading-6 shadow-sm ${
+                              isAI
+                                ? "rounded-tl-md border border-slate-200 bg-white text-slate-700"
+                                : "rounded-tr-md bg-slate-900 text-white"
+                            }`}
+                          >
                             {item.content}
-                          </p>
+                          </div>
+
                         </div>
+
+
+                        {isExpert && (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
+                            <UserRound className="h-5 w-5" />
+                          </div>
+                        )}
+
                       </div>
                     );
                   }
-
-                  return (
-                    <div
-                      key={item.message_id}
-                      className={`flex gap-3 ${
-                        isAI ? "justify-start" : "justify-end"
-                      }`}
-                    >
-                      {isAI && (
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-                          <Bot className="h-5 w-5" />
-                        </div>
-                      )}
-
-                      <div
-                        className={`max-w-[78%] ${
-                          isAI ? "text-left" : "text-right"
-                        }`}
-                      >
-                        <div className="mb-1 flex items-center gap-2">
-                          {!isAI && <div className="flex-1" />}
-
-                          <span className="text-[11px] font-bold text-slate-400">
-                            {isAI ? "K-DNA AI" : "Expert"} ·{" "}
-                            {formatMessageTime(item.created_at)}
-                          </span>
-                        </div>
-
-                        <div
-                          className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-left text-sm font-medium leading-6 shadow-sm ${
-                            isAI
-                              ? "rounded-tl-md border border-slate-200 bg-white text-slate-700"
-                              : "rounded-tr-md bg-slate-900 text-white"
-                          }`}
-                        >
-                          {item.content}
-                        </div>
-                      </div>
-
-                      {isExpert && (
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
-                          <UserRound className="h-5 w-5" />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                )
               )}
+
             </div>
 
+
+            {/* 입력 영역 */}
             <form
               onSubmit={handleSubmit}
               className="border-t border-slate-200 bg-white p-4"
             >
+
               {messageError && (
                 <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
                   {messageError}
                 </p>
               )}
+
 
               {isSending && (
                 <p className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-600">
@@ -537,11 +745,13 @@ export default function InterviewPage() {
                 </p>
               )}
 
+
               {isCompleting && (
                 <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
                   인터뷰를 종료하고 있습니다.
                 </p>
               )}
+
 
               {isInterviewCompleted && (
                 <p className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
@@ -549,10 +759,16 @@ export default function InterviewPage() {
                 </p>
               )}
 
+
               <div className="flex items-end gap-2">
+
                 <textarea
                   value={message}
-                  onChange={(e) => setMessage(e.target.value)}
+                  onChange={(e) =>
+                    setMessage(
+                      e.target.value
+                    )
+                  }
                   placeholder={
                     isInterviewCompleted
                       ? "종료된 인터뷰입니다."
@@ -568,6 +784,7 @@ export default function InterviewPage() {
                   className="min-h-[48px] flex-1 resize-none rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                 />
 
+
                 <button
                   type="submit"
                   disabled={
@@ -575,18 +792,23 @@ export default function InterviewPage() {
                     isCompleting ||
                     isInterviewCompleted ||
                     !interviewId ||
-                    message.trim().length === 0
+                    message.trim().length ===
+                      0
                   }
                   className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                   aria-label="답변 전송"
                 >
                   <ArrowUp className="h-5 w-5" />
                 </button>
+
               </div>
+
 
               <button
                 type="button"
-                onClick={handleEndInterview}
+                onClick={
+                  handleEndInterview
+                }
                 disabled={
                   isSending ||
                   isCompleting ||
@@ -603,12 +825,17 @@ export default function InterviewPage() {
                     ? "인터뷰 종료 중..."
                     : "인터뷰 종료"}
               </button>
+
             </form>
+
           </main>
+
 
           {/* 우측: Live Insight */}
           <aside className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+
             <div className="mb-3 flex items-center gap-2">
+
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100">
                 <Lightbulb className="h-5 w-5 text-amber-600" />
               </div>
@@ -622,10 +849,13 @@ export default function InterviewPage() {
                   Live Insight
                 </p>
               </div>
+
             </div>
+
 
             {!latestTurn ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center">
+
                 <Lightbulb className="mx-auto h-6 w-6 text-slate-300" />
 
                 <p className="mt-2 text-xs font-bold text-slate-500">
@@ -636,12 +866,15 @@ export default function InterviewPage() {
                   전문가 답변을 전송하면 Knowledge Candidate, Gap,
                   Conflict 분석 결과가 표시됩니다.
                 </p>
+
               </div>
             ) : (
               <div className="space-y-3">
+
                 {/* Knowledge Candidate */}
                 {latestKnowledgeCandidate && (
                   <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+
                     <div className="mb-2 flex items-center gap-2 text-blue-600">
                       <BookOpen className="h-4 w-4" />
 
@@ -650,33 +883,47 @@ export default function InterviewPage() {
                       </span>
                     </div>
 
+
                     <p className="mb-1 text-[10px] font-black uppercase text-blue-500">
-                      {latestKnowledgeCandidate.type}
+                      {
+                        latestKnowledgeCandidate.type
+                      }
                     </p>
 
+
                     <h3 className="text-sm font-black text-slate-900">
-                      {latestKnowledgeCandidate.statement}
+                      {
+                        latestKnowledgeCandidate.statement
+                      }
                     </h3>
+
 
                     {latestKnowledgeCandidate.rationale && (
                       <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                        {latestKnowledgeCandidate.rationale}
+                        {
+                          latestKnowledgeCandidate.rationale
+                        }
                       </p>
                     )}
+
 
                     <p className="mt-2 text-[10px] font-bold text-slate-400">
                       Confidence{" "}
                       {Math.round(
-                        latestKnowledgeCandidate.confidence_score * 100
+                        latestKnowledgeCandidate.confidence_score *
+                          100
                       )}
                       %
                     </p>
+
                   </div>
                 )}
+
 
                 {/* Exception */}
                 {latestExceptionCandidate && (
                   <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
+
                     <div className="mb-2 flex items-center gap-2 text-amber-600">
                       <ShieldAlert className="h-4 w-4" />
 
@@ -685,24 +932,33 @@ export default function InterviewPage() {
                       </span>
                     </div>
 
+
                     <h3 className="text-sm font-black text-slate-900">
-                      {latestExceptionCandidate.type === "EXCEPTION"
+                      {latestExceptionCandidate.type ===
+                      "EXCEPTION"
                         ? latestExceptionCandidate.statement
                         : latestExceptionCandidate.exception}
                     </h3>
 
-                    {latestExceptionCandidate.type === "EXCEPTION" &&
+
+                    {latestExceptionCandidate.type ===
+                      "EXCEPTION" &&
                       latestExceptionCandidate.exception && (
                         <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                          {latestExceptionCandidate.exception}
+                          {
+                            latestExceptionCandidate.exception
+                          }
                         </p>
                       )}
+
                   </div>
                 )}
+
 
                 {/* Conflict */}
                 {latestConflict && (
                   <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4">
+
                     <div className="mb-2 flex items-center gap-2 text-rose-600">
                       <AlertTriangle className="h-4 w-4" />
 
@@ -711,32 +967,50 @@ export default function InterviewPage() {
                       </span>
                     </div>
 
+
                     <p className="mb-1 text-[10px] font-black uppercase text-rose-500">
-                      {latestConflict.conflict_type} ·{" "}
-                      {latestConflict.severity}
+                      {
+                        latestConflict.conflict_type
+                      }{" "}
+                      ·{" "}
+                      {
+                        latestConflict.severity
+                      }
                     </p>
 
+
                     <h3 className="text-sm font-black text-slate-900">
-                      {latestConflict.description}
+                      {
+                        latestConflict.description
+                      }
                     </h3>
+
 
                     {latestConflict.context_difference && (
                       <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-                        {latestConflict.context_difference}
+                        {
+                          latestConflict.context_difference
+                        }
                       </p>
                     )}
 
+
                     {latestConflict.recommended_question && (
                       <p className="mt-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold leading-5 text-rose-600">
-                        {latestConflict.recommended_question}
+                        {
+                          latestConflict.recommended_question
+                        }
                       </p>
                     )}
+
                   </div>
                 )}
+
 
                 {/* Gap */}
                 {latestGap && (
                   <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+
                     <div className="mb-2 flex items-center gap-2 text-violet-600">
                       <CircleAlert className="h-4 w-4" />
 
@@ -745,41 +1019,90 @@ export default function InterviewPage() {
                       </span>
                     </div>
 
+
                     <p className="mb-1 text-[10px] font-black uppercase text-violet-500">
-                      {latestGap.topic} · {latestGap.dimension}
+                      {latestGap.topic} ·{" "}
+                      {
+                        latestGap.dimension
+                      }
                     </p>
 
+
                     <h3 className="text-sm font-black text-slate-900">
-                      {latestGap.gap_type}
+                      {
+                        latestGap.gap_type
+                      }
                     </h3>
+
 
                     <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
                       {latestGap.reason}
                     </p>
 
+
                     <p className="mt-2 text-[10px] font-bold text-slate-400">
-                      Gap Score {Math.round(latestGap.gap_score * 100)}%
+                      Gap Score{" "}
+                      {Math.round(
+                        latestGap.gap_score *
+                          100
+                      )}
+                      %
                     </p>
+
                   </div>
                 )}
 
-                {/* 분석 결과는 왔지만 표시할 항목이 없는 경우 */}
+
+                {/* 표시할 분석 결과 없음 */}
                 {!latestKnowledgeCandidate &&
                   !latestExceptionCandidate &&
                   !latestConflict &&
                   !latestGap && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+
                       <p className="text-xs font-semibold text-slate-500">
                         이번 답변에서 표시할 Knowledge Candidate, Gap,
                         Conflict가 생성되지 않았습니다.
                       </p>
+
                     </div>
                   )}
+
               </div>
             )}
+
           </aside>
+
         </div>
       </div>
     </div>
+  );
+}
+
+
+/* ============================================================
+   Page
+
+   Next.js Production Build에서 useSearchParams 사용을 위해
+   실제 Interview 화면을 Suspense로 감싼다.
+============================================================ */
+
+export default function InterviewPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
+          <div className="mx-auto max-w-[1600px]">
+            <section className="rounded-[24px] border border-slate-200 bg-white p-10 text-center shadow-sm">
+              <p className="text-sm font-semibold text-slate-400">
+                Interview를 불러오는 중입니다.
+              </p>
+            </section>
+          </div>
+        </div>
+      }
+    >
+      <InterviewPageContent />
+    </Suspense>
   );
 }
