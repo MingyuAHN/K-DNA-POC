@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   BarChart3,
   Box,
-  ChevronDown,
   CircleAlert,
   Clock3,
   Database,
@@ -16,6 +15,8 @@ import {
   Scale,
   Settings2,
 } from "lucide-react";
+
+import MissionSelector from "@/app/components/common/mission-selector";
 
 import {
   getMissions,
@@ -265,45 +266,12 @@ export default function GapPage() {
         </header>
 
         {/* Mission 선택 */}
-        <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="shrink-0">
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">
-                선택한 미션
-              </p>
-            </div>
-
-            <div className="relative min-w-0 flex-1">
-              <select
-                value={selectedMissionId}
-                onChange={(event) =>
-                  setSelectedMissionId(event.target.value)
-                }
-                disabled={isMissionLoading || missions.length === 0}
-                className="h-11 w-full appearance-none rounded-xl border border-slate-300 bg-white px-4 pr-10 text-sm font-bold text-slate-800 outline-none transition hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-              >
-                {missions.length === 0 ? (
-                  <option value="">
-                    {isMissionLoading
-                      ? "Mission 불러오는 중..."
-                      : "Mission이 없습니다."}
-                  </option>
-                ) : (
-                  missions.map((mission) => (
-                    <option
-                      key={mission.mission_id}
-                      value={mission.mission_id}
-                    >
-                      {mission.title}
-                    </option>
-                  ))
-                )}
-              </select>
-
-              <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-            </div>
-          </div>
-        </section>
+        <MissionSelector
+          missions={missions}
+          selectedMissionId={selectedMissionId}
+          onChange={setSelectedMissionId}
+          loading={isMissionLoading}
+        />
 
         {/* API 오류 */}
         {errorMessage && (

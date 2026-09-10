@@ -271,6 +271,35 @@ useState<InterviewTurnResponse | null>(
 null
 );
 
+// Interview 재진입 시 마지막 Live Insight 복원
+useEffect(() => {
+  if (!selectedInterviewId) {
+    setLatestTurn(null);
+    return;
+  }
+
+  const storageKey =
+    `interview-latest-turn:${selectedInterviewId}`;
+
+  const savedTurn =
+    sessionStorage.getItem(storageKey);
+
+  if (!savedTurn) {
+    setLatestTurn(null);
+    return;
+  }
+
+  try {
+    const parsedTurn =
+      JSON.parse(savedTurn) as InterviewTurnResponse;
+
+    setLatestTurn(parsedTurn);
+  } catch {
+    sessionStorage.removeItem(storageKey);
+    setLatestTurn(null);
+  }
+}, [selectedInterviewId]);
+
 // Mission 조회 상태
 const [mission, setMission] =
 useState<MissionResponse | null>(null);
@@ -927,6 +956,12 @@ try {
 
   setLatestTurn(
     turnResult
+  );
+
+  // 현재 Interview의 마지막 Live Insight 저장
+  sessionStorage.setItem(
+    `interview-latest-turn:${selectedInterviewId}`,
+    JSON.stringify(turnResult)
   );
 
   // /turns 성공 시 해당 Mission의 Knowledge Graph 갱신 필요 표시

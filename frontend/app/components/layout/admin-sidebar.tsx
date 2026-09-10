@@ -168,10 +168,10 @@ export default function AdminSidebar({
             {/* 텍스트 */}
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-[1.15rem] font-extrabold leading-tight tracking-[-0.03em] text-white">
-                Admin OS
+                K-DNA
               </h1>
               <p className="mt-1 truncate text-[0.82rem] font-semibold leading-tight tracking-[-0.01em] text-slate-400">
-                관리 시스템
+                Knowledge Discovery
               </p>
             </div>
           </div>
