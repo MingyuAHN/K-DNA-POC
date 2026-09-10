@@ -8,7 +8,19 @@ from pydantic import (
 )
 
 from .common import ContextTags
-from .enums import KnowledgeType
+
+
+# Baseline 문서에서 추출하는 Claim Type은
+# Interview Knowledge Candidate/Knowledge Unit의 KnowledgeType과 분리한다.
+#
+# 상세설계 Step 0 BaselineClaim:
+# PRINCIPLE / DECISION / EXCEPTION / OUTCOME
+BaselineClaimType = Literal[
+    "PRINCIPLE",
+    "DECISION",
+    "EXCEPTION",
+    "OUTCOME",
+]
 
 
 class BaselineSource(BaseModel):
@@ -22,19 +34,6 @@ class BaselineSource(BaseModel):
 
 
 class BaselineClaimExtractionRequest(BaseModel):
-    """
-    Backend -> AI Baseline Claim Extraction v1.0 contract.
-
-    Required:
-    - schema_version
-    - chunk_id
-    - content
-    - source
-    - context
-
-    ContextTags itself is required, while its individual scalar fields
-    are optional and constraints/tags default to [].
-    """
     model_config = ConfigDict(
         extra="forbid"
     )
@@ -47,12 +46,23 @@ class BaselineClaimExtractionRequest(BaseModel):
 
 
 class BaselineClaim(BaseModel):
+    """
+    Baseline 문서용 Atomic Claim.
+
+    주의:
+    claim_type은 Interview KnowledgeType과 다르다.
+    Baseline에서는 아래 4종만 허용한다.
+    - PRINCIPLE
+    - DECISION
+    - EXCEPTION
+    - OUTCOME
+    """
     model_config = ConfigDict(
         extra="forbid"
     )
 
     statement: str
-    claim_type: KnowledgeType
+    claim_type: BaselineClaimType
     context: ContextTags
 
     source_chunk_id: UUID
@@ -65,12 +75,6 @@ class BaselineClaim(BaseModel):
 
 
 class BaselineClaimExtractionResponse(BaseModel):
-    """
-    AI -> Backend Baseline Claim Extraction v1.0 contract.
-
-    System-managed identifiers are echoed from the request by
-    BaselineClaimExtractor after structured LLM generation.
-    """
     model_config = ConfigDict(
         extra="forbid"
     )

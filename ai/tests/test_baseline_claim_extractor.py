@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from shared.schemas.seed import (
+    BaselineClaim,
     BaselineClaimExtractionRequest,
 )
 from ai.agents.baseline_claim_extractor import (
@@ -21,6 +22,13 @@ TEMP_LLM_CHUNK_ID = (
     "00000000-0000-0000-0000-000000000001"
 )
 
+ALLOWED_BASELINE_TYPES = {
+    "PRINCIPLE",
+    "DECISION",
+    "EXCEPTION",
+    "OUTCOME",
+}
+
 
 class StubLLMGateway:
 
@@ -30,8 +38,6 @@ class StubLLMGateway:
         user_prompt,
         response_model,
     ):
-        # LLM이 다른 "유효한 UUID"를 반환해도 Extractor가
-        # 실제 Request chunk_id로 최종 보정하는지 확인한다.
         mock_result = {
             "schema_version": "1.0",
             "chunk_id": TEMP_LLM_CHUNK_ID,
@@ -39,9 +45,9 @@ class StubLLMGateway:
                 {
                     "statement": (
                         "Migration Phase 1에서는 "
-                        "Shared Physical Database를 사용한다."
+                        "Shared Physical Database를 사용하기로 결정했다."
                     ),
-                    "claim_type": "FACT",
+                    "claim_type": "DECISION",
                     "context": {
                         "project": "Project Alpha",
                         "phase": "Migration Phase 1",
@@ -80,6 +86,17 @@ def _fixture_data():
             encoding="utf-8"
         )
     )
+
+
+def _claim_data(claim_type: str):
+    return {
+        "statement": "테스트 Claim",
+        "claim_type": claim_type,
+        "context": {},
+        "source_chunk_id": str(REQUEST_CHUNK_ID),
+        "source_text": "테스트 원문",
+        "confidence_score": 0.9,
+    }
 
 
 def test_baseline_request_v1_contract():
@@ -165,6 +182,40 @@ def test_invalid_chunk_id_is_rejected():
         )
 
 
+@pytest.mark.parametrize(
+    "claim_type",
+    sorted(ALLOWED_BASELINE_TYPES),
+)
+def test_baseline_claim_allows_only_design_types(
+    claim_type,
+):
+    claim = BaselineClaim.model_validate(
+        _claim_data(claim_type)
+    )
+
+    assert claim.claim_type == claim_type
+
+
+@pytest.mark.parametrize(
+    "invalid_type",
+    [
+        "FACT",
+        "DECISION_RULE",
+        "HEURISTIC",
+        "FAILURE_LESSON",
+        "TRADE_OFF",
+        "EXPERT_OPINION",
+    ],
+)
+def test_baseline_claim_rejects_interview_types(
+    invalid_type,
+):
+    with pytest.raises(ValidationError):
+        BaselineClaim.model_validate(
+            _claim_data(invalid_type)
+        )
+
+
 def test_baseline_claim_extractor_v1_echo_contract():
     request = (
         BaselineClaimExtractionRequest.model_validate(
@@ -186,7 +237,7 @@ def test_baseline_claim_extractor_v1_echo_contract():
     assert len(result.claims) == 1
     claim = result.claims[0]
 
-    assert claim.claim_type.value == "FACT"
+    assert claim.claim_type == "DECISION"
 
     # LLM이 임시 UUID를 반환해도 실제 Request UUID로 보정
     assert claim.source_chunk_id == REQUEST_CHUNK_ID
