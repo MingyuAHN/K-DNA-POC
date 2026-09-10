@@ -473,6 +473,11 @@ function DnaPageContent() {
 
         setMission(missionResult);
         setGraph(graphResult);
+        
+        // 최신 Graph 조회 완료 후 해당 Mission의 갱신 플래그 제거
+        sessionStorage.removeItem(
+          `knowledge-graph-dirty:${missionId}`
+        );
 
         /* VERIFIED 노드 우선 선택 */
         const firstVerified =
