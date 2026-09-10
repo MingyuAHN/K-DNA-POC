@@ -95,7 +95,13 @@ export default function AdminSidebar({
         if (!isMounted) return;
 
         if (Array.isArray(data)) {
-          setMenuItems(data);
+          // Interview는 직접 진입 메뉴에서만 숨김
+          // Mission / Dashboard를 통한 Interview 접근 권한은 유지
+          const visibleMenus = data.filter(
+            (item: MenuItem) => item.path !== "/interview"
+          );
+
+          setMenuItems(visibleMenus);
         } else {
           setMenuItems([]);
         }
