@@ -1,0 +1,34 @@
+{
+  "mission": {
+    "mission_id": "mission-001",
+    "domain": "MSA",
+    "objective": "Legacy Monolith에서 MSA 전환 판단 지식 발굴",
+    "focus_topics": [
+      "Data Ownership",
+      "Migration"
+    ]
+  },
+  "interview": {
+    "interview_id": "interview-001",
+    "expert_id": "expert-001"
+  },
+  "message": {
+    "speaker": "EXPERT",
+    "content": "서비스별 DB는 반드시 분리해야 합니다."
+  },
+  "conversation_context": [],
+  "retrieved_knowledge": [],
+  "retrieved_evidence": [
+    {
+      "source_chunk_id": "chunk-adr021-001",
+      "source": "ADR-021",
+      "content": "Migration Phase 1에서는 Order와 Inventory가 Shared Physical Database를 사용하고 Schema 수준에서 Logical Separation을 적용한다.",
+      "context": {
+        "project": "Project Alpha",
+        "phase": "Migration Phase 1",
+        "domain": "Data Ownership"
+      },
+      "relevance_score": 0.95
+    }
+  ]
+}

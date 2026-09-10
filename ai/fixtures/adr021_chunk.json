@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+  "content": "Migration Phase 1에서는 Order와 Inventory가 Shared Physical Database를 사용하고 Schema 수준에서 Logical Separation을 적용한다.",
+  "source": {
+    "file_name": "ADR-021.md",
+    "page": 3,
+    "section": "Database Migration Strategy"
+  },
+  "context": {
+    "project": "Project Alpha",
+    "phase": "Migration Phase 1",
+    "domain": "Data Ownership",
+    "system": "Order/Inventory",
+    "scope": null,
+    "time": null,
+    "constraints": [
+      "18개월 내 전환"
+    ],
+    "tags": [
+      "database",
+      "migration",
+      "logical-separation"
+    ]
+  }
+}
