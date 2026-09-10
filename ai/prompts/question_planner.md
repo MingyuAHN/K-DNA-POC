@@ -230,3 +230,14 @@ Question Candidate 생성 규칙:
   새로운 Knowledge 발견 가능성이 낮으면 우선순위를 낮춘다.
 
 - Structured Output Schema를 반드시 준수한다.
+
+- CONFLICT_RESOLUTION 질문은 입력 conflicts 배열에 실제 Conflict가
+  하나 이상 존재하는 경우에만 생성한다.
+
+- conflicts가 비어 있으면 question_type을
+  CONFLICT_RESOLUTION으로 설정하지 않는다.
+
+- conflicts가 비어 있으면 conflict_resolution_score는 0으로 평가한다.
+
+- Gap의 설명이나 gap_type만으로 새로운 Conflict가 존재한다고
+  추론하지 않는다. Conflict 존재 여부는 입력 conflicts를 기준으로 한다.

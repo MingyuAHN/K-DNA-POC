@@ -564,11 +564,66 @@ class LangGraphAIOrchestrator:
             result.question_candidates
         )
 
-        # Planner가 질문을 생성하지 못한 예외 상황
+        # ---------------------------------------------------------
+        # Deterministic Guard
+        #
+        # Conflict 존재 여부의 기준은 reduced_conflicts이다.
+        #
+        # conflicts=[] 인 경우:
+        # - CONFLICT_RESOLUTION 질문 제거
+        # - 남아 있는 일반 질문의 conflict_resolution_score는 0으로 보정
+        #
+        # Gap 설명이나 Question Planner의 판단만으로
+        # Conflict가 존재한다고 간주하지 않는다.
+        # ---------------------------------------------------------
+
+        if not reduced_conflicts:
+            guarded_questions = []
+
+            for question in questions:
+                question_type = getattr(
+                    question.question_type,
+                    "value",
+                    question.question_type,
+                )
+
+                if (
+                    str(question_type)
+                    == "CONFLICT_RESOLUTION"
+                ):
+                    print(
+                        "[QUESTION-GUARD] "
+                        "skip CONFLICT_RESOLUTION "
+                        "because conflicts=[]: "
+                        f"{question.question}",
+                        flush=True,
+                    )
+                    continue
+
+                # 실제 Conflict가 없으므로
+                # conflict_resolution_score도 0으로 보정
+                if hasattr(
+                    question,
+                    "conflict_resolution_score",
+                ):
+                    question = question.model_copy(
+                        update={
+                            "conflict_resolution_score": 0.0
+                        }
+                    )
+
+                guarded_questions.append(
+                    question
+                )
+
+            questions = guarded_questions
+
+        # Planner가 질문을 생성하지 못했거나
+        # Guard 적용 후 유효한 질문이 없는 예외 상황
         if not questions:
             print(
                 "[QUESTION] "
-                "planner returned no questions",
+                "planner returned no valid questions",
                 flush=True,
             )
 
@@ -576,7 +631,7 @@ class LangGraphAIOrchestrator:
                 "question_candidates": [],
                 "next_question": None,
             }
-
+        
         # 이전 AI 질문과 너무 유사한 질문은 우선 제외한다.
         # 단, 전부 유사하더라도 인터뷰를 자동 종료하지 않고
         # 가장 가치가 높은 질문을 fallback으로 선택한다.
