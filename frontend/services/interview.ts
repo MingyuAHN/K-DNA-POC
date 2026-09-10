@@ -12,6 +12,11 @@ export type InterviewMessageRole =
   | "ASSISTANT"
   | "SYSTEM";
 
+
+// ============================================================
+// Expert
+// ============================================================
+
 export type ExpertCreateRequest = {
   name: string;
   organization?: string | null;
@@ -28,6 +33,16 @@ export type ExpertResponse = {
   created_at: string;
   updated_at: string;
 };
+
+export type ExpertListResponse = {
+  total: number;
+  experts: ExpertResponse[];
+};
+
+
+// ============================================================
+// Interview
+// ============================================================
 
 export type InterviewCreateRequest = {
   expert_id: string;
@@ -69,6 +84,7 @@ export type InterviewMessagesResponse = {
   interview_id: string;
   messages: InterviewMessage[];
 };
+
 
 // ============================================================
 // Interview Turn
@@ -159,7 +175,8 @@ export type InterviewTurnResponse = {
   next_question: QuestionCandidateItem | null;
 };
 
-// Backend 오류 응답 메시지 추출
+
+// Backend 오류 메시지 추출
 async function getErrorMessage(
   response: Response,
   fallbackMessage: string
@@ -176,6 +193,62 @@ async function getErrorMessage(
     return fallbackMessage;
   }
 }
+
+
+// ============================================================
+// Expert API
+// ============================================================
+
+// Expert 목록 조회 / 검색
+export async function getExperts(
+  query = "",
+  limit = 100
+): Promise<ExpertListResponse> {
+  const searchParams = new URLSearchParams();
+
+  if (query.trim()) {
+    searchParams.set("query", query.trim());
+  }
+
+  searchParams.set("limit", String(limit));
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/experts?${searchParams.toString()}`
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "전문가 목록을 불러오는 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+
+// Expert 단건 조회
+export async function getExpert(
+  expertId: string
+): Promise<ExpertResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/experts/${expertId}`
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "전문가 정보를 불러오는 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
 
 // Expert 등록
 export async function createExpert(
@@ -203,6 +276,11 @@ export async function createExpert(
 
   return response.json();
 }
+
+
+// ============================================================
+// Interview API
+// ============================================================
 
 // Interview 생성
 export async function createInterview(
@@ -232,6 +310,7 @@ export async function createInterview(
   return response.json();
 }
 
+
 // Mission별 Interview 목록 조회
 export async function getMissionInterviews(
   missionId: string
@@ -252,10 +331,9 @@ export async function getMissionInterviews(
   return response.json();
 }
 
+
 // Expert 메시지 저장
-// 기본 메시지 저장 API.
-// /turns 연동 이후 Interview 입력에서는 이 함수와
-// processInterviewTurn()을 동시에 호출하면 안 됨.
+// /turns 사용 시 이 함수와 동시에 호출하면 안 됨.
 export async function sendInterviewMessage(
   interviewId: string,
   payload: InterviewMessageCreateRequest
@@ -282,6 +360,7 @@ export async function sendInterviewMessage(
 
   return response.json();
 }
+
 
 // Interview 대화 이력 조회
 export async function getInterviewMessages(
@@ -310,14 +389,9 @@ export async function getInterviewMessages(
   };
 }
 
+
 // Interview 1 Turn 처리
-// Expert 답변 저장 → AI 분석 → Gap/Conflict/Question 생성
-// → 필요 시 ASSISTANT 메시지 저장까지 Backend에서 수행
-//
-// AI가 next_question=null을 반환하거나
-// Backend 최대 후속 질문 수에 도달하면
-// Backend에서 Interview를 자동 COMPLETED 처리하고
-// next_question=null을 반환함.
+// 답변 저장 → AI 분석 → 후속 질문 생성
 export async function processInterviewTurn(
   interviewId: string,
   payload: InterviewTurnRequest
@@ -345,17 +419,8 @@ export async function processInterviewTurn(
   return response.json();
 }
 
+
 // Interview 수동 종료
-//
-// POST /api/v1/interviews/{interview_id}/complete
-// Request Body 없음.
-//
-// Backend에서:
-// - status = COMPLETED
-// - ended_at 기록
-//
-// 이미 COMPLETED인 경우에는 현재 Interview를 그대로 반환함.
-// CANCELLED 상태인 경우에는 409 Conflict가 반환됨.
 export async function completeInterview(
   interviewId: string
 ): Promise<InterviewResponse> {
