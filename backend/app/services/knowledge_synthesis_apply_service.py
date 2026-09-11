@@ -38,6 +38,11 @@ from app.services.knowledge_duplicate_service import (
 logger = logging.getLogger(__name__)
 
 
+PERSISTENT_VERSION_RELATION_TYPES = {
+    "HAS_EXCEPTION",
+}
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -433,6 +438,7 @@ def _add_relation_if_missing(
     target_id: uuid.UUID,
     relation_type: str,
     source_analysis_id: uuid.UUID | None,
+    confidence_score: float = 1.0,
 ) -> None:
 
     if source_id == target_id:
@@ -460,12 +466,214 @@ def _add_relation_if_missing(
             from_knowledge_id=source_id,
             to_knowledge_id=target_id,
             relation_type=relation_type,
-            confidence_score=1.0,
+            confidence_score=confidence_score,
             source_analysis_id=(
                 source_analysis_id
             ),
         )
     )
+
+
+def _collect_persistent_relation_inheritance_specs(
+    old_knowledge_id: uuid.UUID,
+    new_knowledge_id: uuid.UUID,
+    relations: list[KnowledgeRelation],
+) -> list[
+    tuple[
+        uuid.UUID,
+        uuid.UUID,
+        str,
+        uuid.UUID | None,
+        float,
+    ]
+]:
+    """
+    새 Version으로 승계해야 하는 의미 관계를 pure-data 형태로 계산한다.
+
+    현재는 HAS_EXCEPTION만 승계한다.
+
+    예:
+      old parent --HAS_EXCEPTION--> exception
+      new parent --HAS_EXCEPTION--> exception
+
+    반대로 EXCEPTION 자체가 version-up되는 경우도 지원한다.
+
+      principle --HAS_EXCEPTION--> old exception
+      principle --HAS_EXCEPTION--> new exception
+
+    SUPERSEDES/REFINES/SUPPORTS 등은 현재 version에서 새로 판단해야 하므로
+    자동 승계하지 않는다.
+    """
+
+    result: list[
+        tuple[
+            uuid.UUID,
+            uuid.UUID,
+            str,
+            uuid.UUID | None,
+            float,
+        ]
+    ] = []
+    seen: set[
+        tuple[
+            uuid.UUID,
+            uuid.UUID,
+            str,
+        ]
+    ] = set()
+
+    for relation in relations:
+        relation_type = relation.relation_type
+
+        if (
+            relation_type
+            not in PERSISTENT_VERSION_RELATION_TYPES
+        ):
+            continue
+
+        if (
+            relation.from_knowledge_id
+            == old_knowledge_id
+        ):
+            source_id = new_knowledge_id
+            target_id = (
+                relation.to_knowledge_id
+            )
+
+        elif (
+            relation.to_knowledge_id
+            == old_knowledge_id
+        ):
+            source_id = (
+                relation.from_knowledge_id
+            )
+            target_id = new_knowledge_id
+
+        else:
+            continue
+
+        if source_id == target_id:
+            continue
+
+        key = (
+            source_id,
+            target_id,
+            relation_type,
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        confidence = (
+            float(relation.confidence_score)
+            if relation.confidence_score
+            is not None
+            else 1.0
+        )
+
+        result.append(
+            (
+                source_id,
+                target_id,
+                relation_type,
+                relation.source_analysis_id,
+                confidence,
+            )
+        )
+
+    return result
+
+
+def _inherit_persistent_relations_for_new_version(
+    db: Session,
+    target: KnowledgeUnit,
+    new_knowledge: KnowledgeUnit,
+) -> int:
+    """
+    ENRICH/SUPERSEDE로 새 Knowledge Version이 만들어질 때
+    이전 Version에 연결되어 있던 지속 의미 관계를 새 Version으로
+    승계한다.
+
+    현재 승계 대상은 HAS_EXCEPTION뿐이다. Version/history 관계나
+    SUPPORTS/CONTRADICTS/CONTEXT_DIFFERS 등은 자동 승계하지 않는다.
+    """
+
+    outgoing = (
+        db.query(KnowledgeRelation)
+        .filter(
+            KnowledgeRelation.from_knowledge_id
+            == target.knowledge_id,
+            KnowledgeRelation.relation_type.in_(
+                PERSISTENT_VERSION_RELATION_TYPES
+            ),
+        )
+        .all()
+    )
+
+    incoming = (
+        db.query(KnowledgeRelation)
+        .filter(
+            KnowledgeRelation.to_knowledge_id
+            == target.knowledge_id,
+            KnowledgeRelation.relation_type.in_(
+                PERSISTENT_VERSION_RELATION_TYPES
+            ),
+        )
+        .all()
+    )
+
+    specs = (
+        _collect_persistent_relation_inheritance_specs(
+            old_knowledge_id=(
+                target.knowledge_id
+            ),
+            new_knowledge_id=(
+                new_knowledge.knowledge_id
+            ),
+            relations=[
+                *outgoing,
+                *incoming,
+            ],
+        )
+    )
+
+    for (
+        source_id,
+        target_id,
+        relation_type,
+        source_analysis_id,
+        confidence_score,
+    ) in specs:
+        _add_relation_if_missing(
+            db=db,
+            mission_id=target.mission_id,
+            source_id=source_id,
+            target_id=target_id,
+            relation_type=relation_type,
+            source_analysis_id=(
+                source_analysis_id
+            ),
+            confidence_score=(
+                confidence_score
+            ),
+        )
+
+    if specs:
+        logger.info(
+            (
+                "Inherited %s persistent relations "
+                "for knowledge version change "
+                "old_knowledge_id=%s "
+                "new_knowledge_id=%s"
+            ),
+            len(specs),
+            target.knowledge_id,
+            new_knowledge.knowledge_id,
+        )
+
+    return len(specs)
 
 
 def _create_evidence(
@@ -1127,6 +1335,14 @@ def validate_and_apply_synthesis(
                     if analysis is not None
                     else None
                 ),
+            )
+
+            # 이전 Version에 연결된 지속 의미 관계를 새 Version에도
+            # 승계한다. 현재는 HAS_EXCEPTION만 대상이다.
+            _inherit_persistent_relations_for_new_version(
+                db=db,
+                target=target,
+                new_knowledge=new_knowledge,
             )
 
             applied_map[
