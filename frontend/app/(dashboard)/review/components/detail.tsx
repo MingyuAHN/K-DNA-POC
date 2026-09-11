@@ -26,6 +26,7 @@ import type {
   KnowledgeCandidateEditRequest,
   KnowledgeReviewCandidate,
   KnowledgeType,
+  ReviewEvidence,
 } from "@/services/review";
 
 import {
@@ -43,17 +44,25 @@ type ReviewAction =
   | null;
 
 type DetailProps = {
-  candidate: KnowledgeReviewCandidate | null;
-  processingAction: ReviewAction;
+  candidate:
+    | KnowledgeReviewCandidate
+    | null;
+
+  processingAction:
+    ReviewAction;
 
   onApprove: () => void;
+
   onSaveEdit: (
-    payload: KnowledgeCandidateEditRequest
+    payload:
+      KnowledgeCandidateEditRequest
   ) => void;
+
   onReject: () => void;
 };
 
-const knowledgeTypes: KnowledgeType[] = [
+const knowledgeTypes:
+  KnowledgeType[] = [
   "FACT",
   "PRINCIPLE",
   "DECISION_RULE",
@@ -77,26 +86,39 @@ export default function ReviewDetail({
   onSaveEdit,
   onReject,
 }: DetailProps) {
-  const [isEditing, setIsEditing] =
-    useState(false);
+  const [
+    isEditing,
+    setIsEditing,
+  ] = useState(false);
 
-  const [statement, setStatement] =
-    useState("");
+  const [
+    statement,
+    setStatement,
+  ] = useState("");
 
   const [
     knowledgeType,
     setKnowledgeType,
-  ] = useState<KnowledgeType>("FACT");
+  ] =
+    useState<KnowledgeType>(
+      "FACT"
+    );
 
   // Context
-  const [domain, setDomain] =
-    useState("");
+  const [
+    domain,
+    setDomain,
+  ] = useState("");
 
-  const [scope, setScope] =
-    useState("");
+  const [
+    scope,
+    setScope,
+  ] = useState("");
 
-  const [phase, setPhase] =
-    useState("");
+  const [
+    phase,
+    setPhase,
+  ] = useState("");
 
   const [
     constraints,
@@ -109,22 +131,30 @@ export default function ReviewDetail({
     setIfConditions,
   ] = useState("");
 
-  const [thenRule, setThenRule] =
-    useState("");
+  const [
+    thenRule,
+    setThenRule,
+  ] = useState("");
 
   const [
     unlessConditions,
     setUnlessConditions,
   ] = useState("");
 
-  const [exception, setException] =
-    useState("");
+  const [
+    exception,
+    setException,
+  ] = useState("");
 
-  const [editReason, setEditReason] =
-    useState("");
+  const [
+    editReason,
+    setEditReason,
+  ] = useState("");
 
-  const [editError, setEditError] =
-    useState("");
+  const [
+    editError,
+    setEditError,
+  ] = useState("");
 
   // Candidate 초기화
   useEffect(() => {
@@ -132,7 +162,10 @@ export default function ReviewDetail({
       return;
     }
 
-    resetEditValues(candidate);
+    resetEditValues(
+      candidate
+    );
+
     setIsEditing(false);
   }, [candidate]);
 
@@ -157,7 +190,8 @@ export default function ReviewDetail({
 
   // 편집값 초기화
   function resetEditValues(
-    target: KnowledgeReviewCandidate
+    target:
+      KnowledgeReviewCandidate
   ) {
     const context =
       target.context ?? {};
@@ -165,7 +199,9 @@ export default function ReviewDetail({
     const rule =
       target.decision_rule;
 
-    setStatement(target.statement);
+    setStatement(
+      target.statement
+    );
 
     setKnowledgeType(
       toKnowledgeType(
@@ -228,96 +264,118 @@ export default function ReviewDetail({
   }
 
   // 편집 시작
-  const handleStartEdit = () => {
-    setEditError("");
-    setIsEditing(true);
-  };
+  const handleStartEdit =
+    () => {
+      setEditError("");
+      setIsEditing(true);
+    };
 
   // 편집 취소
-  const handleCancelEdit = () => {
-    resetEditValues(candidate);
-    setIsEditing(false);
-  };
+  const handleCancelEdit =
+    () => {
+      resetEditValues(
+        candidate
+      );
+
+      setIsEditing(false);
+    };
 
   // 수정 저장
-  const handleSaveEdit = () => {
-    if (!statement.trim()) {
-      setEditError(
-        "추출 지식을 입력해주세요."
-      );
-      return;
-    }
+  const handleSaveEdit =
+    () => {
+      if (
+        !statement.trim()
+      ) {
+        setEditError(
+          "추출 지식을 입력해주세요."
+        );
 
-    const parsedIfConditions =
-      splitLines(ifConditions);
+        return;
+      }
 
-    const parsedUnless =
-      splitLines(
-        unlessConditions
-      );
+      const parsedIfConditions =
+        splitLines(
+          ifConditions
+        );
 
-    const hasDecisionRule =
-      parsedIfConditions.length > 0 ||
-      Boolean(thenRule.trim()) ||
-      parsedUnless.length > 0;
+      const parsedUnless =
+        splitLines(
+          unlessConditions
+        );
 
-    if (
-      hasDecisionRule &&
-      !thenRule.trim()
-    ) {
-      setEditError(
-        "판단 규칙을 입력한 경우 THEN 값이 필요합니다."
-      );
-      return;
-    }
+      const hasDecisionRule =
+        parsedIfConditions.length >
+          0 ||
+        Boolean(
+          thenRule.trim()
+        ) ||
+        parsedUnless.length > 0;
 
-    setEditError("");
+      if (
+        hasDecisionRule &&
+        !thenRule.trim()
+      ) {
+        setEditError(
+          "판단 규칙을 입력한 경우 THEN 값이 필요합니다."
+        );
 
-    onSaveEdit({
-      statement:
-        statement.trim(),
+        return;
+      }
 
-      knowledge_type:
-        knowledgeType,
+      setEditError("");
 
-      // 표시하지 않은 Context 값은 유지
-      context: {
-        ...candidate.context,
+      onSaveEdit({
+        statement:
+          statement.trim(),
 
-        domain:
-          domain.trim() || null,
+        knowledge_type:
+          knowledgeType,
 
-        scope:
-          scope.trim() || null,
+        // 숨긴 Context 값 유지
+        context: {
+          ...candidate.context,
 
-        phase:
-          phase.trim() || null,
+          domain:
+            domain.trim() ||
+            null,
 
-        constraints:
-          splitCommaValues(
-            constraints
-          ),
-      },
+          scope:
+            scope.trim() ||
+            null,
 
-      decision_rule:
-        hasDecisionRule
-          ? {
-              if_conditions:
-                parsedIfConditions,
-              then:
-                thenRule.trim(),
-              unless:
-                parsedUnless,
-            }
-          : null,
+          phase:
+            phase.trim() ||
+            null,
 
-      exception:
-        exception.trim() || null,
+          constraints:
+            splitCommaValues(
+              constraints
+            ),
+        },
 
-      edit_reason:
-        editReason.trim() || null,
-    });
-  };
+        decision_rule:
+          hasDecisionRule
+            ? {
+                if_conditions:
+                  parsedIfConditions,
+
+                then:
+                  thenRule.trim(),
+
+                unless:
+                  parsedUnless,
+              }
+            : null,
+
+        exception:
+          exception.trim() ||
+          null,
+
+        edit_reason:
+          editReason.trim() ||
+          null,
+      });
+    };
 
   return (
     <section className="space-y-4">
@@ -342,7 +400,9 @@ export default function ReviewDetail({
             </div>
 
             <p className="mt-2 break-all text-xs font-semibold text-slate-500">
-              {candidate.candidate_id}
+              {
+                candidate.candidate_id
+              }
             </p>
           </div>
 
@@ -363,25 +423,42 @@ export default function ReviewDetail({
 
       {isEditing ? (
         <EditForm
-          statement={statement}
-          knowledgeType={knowledgeType}
+          statement={
+            statement
+          }
+          knowledgeType={
+            knowledgeType
+          }
           domain={domain}
           scope={scope}
           phase={phase}
-          constraints={constraints}
-          ifConditions={ifConditions}
-          thenRule={thenRule}
+          constraints={
+            constraints
+          }
+          ifConditions={
+            ifConditions
+          }
+          thenRule={
+            thenRule
+          }
           unlessConditions={
             unlessConditions
           }
-          exception={exception}
-          editReason={editReason}
-          editError={editError}
-          sourceMessageId={
-            candidate.source_message_id
+          exception={
+            exception
+          }
+          editReason={
+            editReason
+          }
+          editError={
+            editError
+          }
+          evidence={
+            candidate.evidence
           }
           isSaving={
-            processingAction === "EDIT"
+            processingAction ===
+            "EDIT"
           }
           onStatementChange={
             setStatement
@@ -465,13 +542,9 @@ export default function ReviewDetail({
               )}
             />
 
-            <ContentCard
-              title="근거"
-              subtitle="Evidence"
-              icon={FileSearch}
-              content={
-                `Source Message\n${candidate.source_message_id}\n\n` +
-                "현재 Review API에서는 Evidence 원문을 제공하지 않습니다."
+            <EvidenceCard
+              evidence={
+                candidate.evidence
               }
             />
           </div>
@@ -494,8 +567,12 @@ export default function ReviewDetail({
           <div className="grid gap-3 sm:grid-cols-3">
             <button
               type="button"
-              disabled={isProcessing}
-              onClick={onApprove}
+              disabled={
+                isProcessing
+              }
+              onClick={
+                onApprove
+              }
               className="flex h-12 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <CheckCircle2 className="h-4 w-4" />
@@ -508,7 +585,9 @@ export default function ReviewDetail({
 
             <button
               type="button"
-              disabled={isProcessing}
+              disabled={
+                isProcessing
+              }
               onClick={
                 handleStartEdit
               }
@@ -520,8 +599,12 @@ export default function ReviewDetail({
 
             <button
               type="button"
-              disabled={isProcessing}
-              onClick={onReject}
+              disabled={
+                isProcessing
+              }
+              onClick={
+                onReject
+              }
               className="flex h-12 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-black text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <XCircle className="h-4 w-4" />
@@ -555,7 +638,10 @@ type EditFormProps = {
   editReason: string;
   editError: string;
 
-  sourceMessageId: string;
+  evidence:
+    | ReviewEvidence
+    | null;
+
   isSaving: boolean;
 
   onStatementChange: (
@@ -619,7 +705,7 @@ function EditForm({
   exception,
   editReason,
   editError,
-  sourceMessageId,
+  evidence,
   isSaving,
   onStatementChange,
   onKnowledgeTypeChange,
@@ -656,22 +742,30 @@ function EditForm({
         {/* Knowledge */}
         <EditField label="추출 지식">
           <textarea
-            value={statement}
+            value={
+              statement
+            }
             onChange={(event) =>
               onStatementChange(
                 event.target.value
               )
             }
-            rows={2}
-            className={textareaClass}
+            rows={3}
+            className={
+              textareaClass
+            }
           />
         </EditField>
 
         {/* 지식 유형 */}
         <EditField label="Knowledge Type">
           <KnowledgeTypeDropdown
-            value={knowledgeType}
-            disabled={isSaving}
+            value={
+              knowledgeType
+            }
+            disabled={
+              isSaving
+            }
             onChange={
               onKnowledgeTypeChange
             }
@@ -689,53 +783,69 @@ function EditForm({
           <div className="grid gap-4 md:grid-cols-2">
             <EditField label="도메인">
               <input
-                value={domain}
+                value={
+                  domain
+                }
                 onChange={(event) =>
                   onDomainChange(
                     event.target.value
                   )
                 }
                 placeholder="예: MSA Architecture"
-                className={inputClass}
+                className={
+                  inputClass
+                }
               />
             </EditField>
 
             <EditField label="적용 범위">
               <input
-                value={scope}
+                value={
+                  scope
+                }
                 onChange={(event) =>
                   onScopeChange(
                     event.target.value
                   )
                 }
                 placeholder="예: 서비스 DB 분리"
-                className={inputClass}
+                className={
+                  inputClass
+                }
               />
             </EditField>
 
             <EditField label="단계">
               <input
-                value={phase}
+                value={
+                  phase
+                }
                 onChange={(event) =>
                   onPhaseChange(
                     event.target.value
                   )
                 }
                 placeholder="예: 전환 단계"
-                className={inputClass}
+                className={
+                  inputClass
+                }
               />
             </EditField>
 
             <EditField label="제약 조건">
               <input
-                value={constraints}
+                value={
+                  constraints
+                }
                 onChange={(event) =>
                   onConstraintsChange(
                     event.target.value
                   )
                 }
                 placeholder="여러 개면 쉼표로 구분"
-                className={inputClass}
+                className={
+                  inputClass
+                }
               />
             </EditField>
           </div>
@@ -744,7 +854,9 @@ function EditForm({
         {/* Rule */}
         <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
           <SectionTitle
-            icon={ShieldCheck}
+            icon={
+              ShieldCheck
+            }
             title="판단 규칙"
             subtitle="Rule"
           />
@@ -755,7 +867,9 @@ function EditForm({
               description="여러 조건은 줄바꿈으로 구분합니다."
             >
               <textarea
-                value={ifConditions}
+                value={
+                  ifConditions
+                }
                 onChange={(event) =>
                   onIfConditionsChange(
                     event.target.value
@@ -763,13 +877,17 @@ function EditForm({
                 }
                 rows={2}
                 placeholder="판단 조건"
-                className={textareaClass}
+                className={
+                  textareaClass
+                }
               />
             </EditField>
 
             <EditField label="THEN">
               <textarea
-                value={thenRule}
+                value={
+                  thenRule
+                }
                 onChange={(event) =>
                   onThenRuleChange(
                     event.target.value
@@ -777,7 +895,9 @@ function EditForm({
                 }
                 rows={2}
                 placeholder="조건 충족 시 판단"
-                className={textareaClass}
+                className={
+                  textareaClass
+                }
               />
             </EditField>
 
@@ -796,7 +916,9 @@ function EditForm({
                 }
                 rows={2}
                 placeholder="판단 규칙의 예외"
-                className={textareaClass}
+                className={
+                  textareaClass
+                }
               />
             </EditField>
           </div>
@@ -805,47 +927,44 @@ function EditForm({
         {/* Exception */}
         <EditField label="예외 조건">
           <textarea
-            value={exception}
+            value={
+              exception
+            }
             onChange={(event) =>
               onExceptionChange(
                 event.target.value
               )
             }
-            rows={2}
+            rows={3}
             placeholder="지식 자체의 예외 조건"
-            className={textareaClass}
+            className={
+              textareaClass
+            }
           />
         </EditField>
 
         {/* Evidence */}
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <SectionTitle
-            icon={FileSearch}
-            title="근거"
-            subtitle="Evidence"
-          />
-
-          <p className="break-all text-xs font-semibold text-slate-700">
-            Source Message:{" "}
-            {sourceMessageId}
-          </p>
-
-          <p className="mt-2 text-[11px] font-semibold text-slate-400">
-            현재 Review API에서는 Evidence 원문을 제공하지 않습니다.
-          </p>
-        </div>
+        <EvidenceCard
+          evidence={
+            evidence
+          }
+        />
 
         {/* 수정 사유 */}
         <EditField label="수정 사유">
           <input
-            value={editReason}
+            value={
+              editReason
+            }
             onChange={(event) =>
               onEditReasonChange(
                 event.target.value
               )
             }
             placeholder="예: 전문가 검토 후 표현 보완"
-            className={inputClass}
+            className={
+              inputClass
+            }
           />
         </EditField>
 
@@ -860,8 +979,12 @@ function EditForm({
       <div className="mt-5 flex justify-end gap-2">
         <button
           type="button"
-          disabled={isSaving}
-          onClick={onCancel}
+          disabled={
+            isSaving
+          }
+          onClick={
+            onCancel
+          }
           className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
         >
           <X className="h-4 w-4" />
@@ -874,7 +997,9 @@ function EditForm({
             isSaving ||
             !statement.trim()
           }
-          onClick={onSave}
+          onClick={
+            onSave
+          }
           className="flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:bg-blue-300"
         >
           <Save className="h-4 w-4" />
@@ -895,6 +1020,7 @@ function KnowledgeTypeDropdown({
 }: {
   value: KnowledgeType;
   disabled: boolean;
+
   onChange: (
     value: KnowledgeType
   ) => void;
@@ -939,15 +1065,20 @@ function KnowledgeTypeDropdown({
 
   return (
     <div
-      ref={containerRef}
+      ref={
+        containerRef
+      }
       className="relative"
     >
       <button
         type="button"
-        disabled={disabled}
+        disabled={
+          disabled
+        }
         onClick={() =>
           setIsOpen(
-            (current) => !current
+            (current) =>
+              !current
           )
         }
         className={`flex min-h-[46px] w-full items-center justify-between rounded-xl border bg-white px-4 py-2.5 text-left transition ${
@@ -980,11 +1111,18 @@ function KnowledgeTypeDropdown({
 
               return (
                 <button
-                  key={type}
+                  key={
+                    type
+                  }
                   type="button"
                   onClick={() => {
-                    onChange(type);
-                    setIsOpen(false);
+                    onChange(
+                      type
+                    );
+
+                    setIsOpen(
+                      false
+                    );
                   }}
                   className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 ${
                     isSelected
@@ -1004,6 +1142,65 @@ function KnowledgeTypeDropdown({
                 </button>
               );
             }
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceCard({
+  evidence,
+}: {
+  evidence:
+    | ReviewEvidence
+    | null;
+}) {
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+          <FileSearch className="h-4 w-4" />
+        </div>
+
+        <div>
+          <p className="text-xs font-black text-slate-900">
+            근거
+          </p>
+
+          <p className="text-[10px] font-semibold text-slate-400">
+            Evidence
+          </p>
+        </div>
+      </div>
+
+      <p className="whitespace-pre-line text-xs font-semibold leading-6 text-slate-700">
+        {evidence?.source_text ||
+          "근거 정보가 없습니다."}
+      </p>
+
+      {evidence && (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <p className="text-[10px] font-semibold text-slate-400">
+            {
+              evidence.source_type
+            }
+          </p>
+
+          <p className="mt-1 break-all text-[10px] font-medium text-slate-400">
+            {
+              evidence.source_id
+            }
+          </p>
+
+          {evidence.confidence_score !==
+            null && (
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              Evidence Confidence{" "}
+              {formatConfidence(
+                evidence.confidence_score
+              )}
+            </p>
           )}
         </div>
       )}
@@ -1121,7 +1318,9 @@ function toKnowledgeType(
   const type =
     value as KnowledgeType;
 
-  return knowledgeTypes.includes(type)
+  return knowledgeTypes.includes(
+    type
+  )
     ? type
     : "FACT";
 }
@@ -1129,7 +1328,8 @@ function toKnowledgeType(
 function getStringValue(
   value: unknown
 ) {
-  return typeof value === "string"
+  return typeof value ===
+    "string"
     ? value
     : "";
 }
@@ -1137,18 +1337,28 @@ function getStringValue(
 function getStringArray(
   value: unknown
 ) {
-  if (!Array.isArray(value)) {
+  if (
+    !Array.isArray(value)
+  ) {
     return [];
   }
 
   return value.filter(
-    (item): item is string =>
-      typeof item === "string"
+    (
+      item
+    ): item is string =>
+      typeof item ===
+      "string"
   );
 }
 
 function getRuleString(
-  rule: Record<string, unknown> | null,
+  rule:
+    | Record<
+        string,
+        unknown
+      >
+    | null,
   key: string
 ) {
   if (!rule) {
@@ -1161,7 +1371,12 @@ function getRuleString(
 }
 
 function getRuleArray(
-  rule: Record<string, unknown> | null,
+  rule:
+    | Record<
+        string,
+        unknown
+      >
+    | null,
   key: string,
   fallbackKey?: string
 ) {
@@ -1170,9 +1385,13 @@ function getRuleArray(
   }
 
   const primary =
-    getStringArray(rule[key]);
+    getStringArray(
+      rule[key]
+    );
 
-  if (primary.length > 0) {
+  if (
+    primary.length > 0
+  ) {
     return primary;
   }
 

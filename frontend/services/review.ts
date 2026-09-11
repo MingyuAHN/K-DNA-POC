@@ -1,7 +1,9 @@
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://127.0.0.1:8000";
 
-export type ReviewContext = Record<string, unknown>;
+export type ReviewContext =
+  Record<string, unknown>;
 
 export type ReviewDecisionRule =
   | Record<string, unknown>
@@ -17,6 +19,13 @@ export type KnowledgeType =
   | "TRADE_OFF"
   | "EXPERT_OPINION";
 
+export type ReviewEvidence = {
+  source_type: string;
+  source_id: string;
+  source_text: string;
+  confidence_score: number | null;
+};
+
 export type KnowledgeReviewCandidate = {
   candidate_id: string;
   analysis_id: string;
@@ -29,6 +38,8 @@ export type KnowledgeReviewCandidate = {
   decision_rule: ReviewDecisionRule;
   rationale: string | null;
   exception: string | null;
+
+  evidence: ReviewEvidence | null;
 
   novelty_score: number | null;
   confidence_score: number | null;
@@ -123,7 +134,8 @@ export type KnowledgeSynthesisResponse = {
 
   target_knowledge_ids: string[];
 
-  synthesized_knowledge_units: SynthesizedKnowledgeUnit[];
+  synthesized_knowledge_units:
+    SynthesizedKnowledgeUnit[];
 
   relations: SynthesisRelation[];
 
@@ -168,9 +180,13 @@ async function getErrorMessage(
   fallbackMessage: string
 ) {
   try {
-    const data = await response.json();
+    const data =
+      await response.json();
 
-    if (typeof data?.detail === "string") {
+    if (
+      typeof data?.detail ===
+      "string"
+    ) {
       return data.detail;
     }
 
@@ -184,16 +200,18 @@ async function getErrorMessage(
 export async function getMissionReviewCandidates(
   missionId: string
 ): Promise<KnowledgeReviewCandidateListResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/missions/${missionId}/knowledge-review-candidates`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    }
-  );
+  const response =
+    await fetch(
+      `${API_BASE_URL}/api/v1/missions/${missionId}/knowledge-review-candidates`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        cache: "no-store",
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -212,16 +230,20 @@ export async function editKnowledgeCandidate(
   candidateId: string,
   payload: KnowledgeCandidateEditRequest
 ): Promise<KnowledgeCandidateEditResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/knowledge-candidates/${candidateId}`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }
-  );
+  const response =
+    await fetch(
+      `${API_BASE_URL}/api/v1/knowledge-candidates/${candidateId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(
+          payload
+        ),
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -240,19 +262,22 @@ export async function synthesizeKnowledgeCandidate(
   candidateId: string,
   payload: KnowledgeSynthesisRequest = {}
 ): Promise<KnowledgeSynthesisResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/knowledge-candidates/${candidateId}/synthesize`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        related_knowledge_ids:
-          payload.related_knowledge_ids ?? [],
-      }),
-    }
-  );
+  const response =
+    await fetch(
+      `${API_BASE_URL}/api/v1/knowledge-candidates/${candidateId}/synthesize`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          related_knowledge_ids:
+            payload.related_knowledge_ids ??
+            [],
+        }),
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -271,22 +296,27 @@ export async function validateKnowledgeSynthesis(
   synthesisId: string,
   payload: KnowledgeSynthesisValidationRequest
 ): Promise<KnowledgeSynthesisValidationResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/knowledge-syntheses/${synthesisId}/validate`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }
-  );
+  const response =
+    await fetch(
+      `${API_BASE_URL}/api/v1/knowledge-syntheses/${synthesisId}/validate`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(
+          payload
+        ),
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
       await getErrorMessage(
         response,
-        payload.decision === "APPROVE"
+        payload.decision ===
+          "APPROVE"
           ? "Knowledge 승인에 실패했습니다."
           : "Knowledge 거절에 실패했습니다."
       )
