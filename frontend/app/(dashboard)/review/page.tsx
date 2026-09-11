@@ -15,9 +15,11 @@ import {
 } from "@/services/mission";
 
 import {
+  editKnowledgeCandidate,
   getMissionReviewCandidates,
   synthesizeKnowledgeCandidate,
   validateKnowledgeSynthesis,
+  type KnowledgeCandidateEditRequest,
   type KnowledgeReviewCandidate,
 } from "@/services/review";
 
@@ -26,6 +28,7 @@ import ReviewDetail from "./components/detail";
 
 type ReviewAction =
   | "APPROVE"
+  | "EDIT"
   | "REJECT"
   | null;
 
@@ -41,13 +44,11 @@ export default function ReviewPage() {
     setSelectedMissionId,
   ] = useState("");
 
-  // Review Candidates
+  // Review Candidate
   const [
     candidates,
     setCandidates,
-  ] = useState<
-    KnowledgeReviewCandidate[]
-  >([]);
+  ] = useState<KnowledgeReviewCandidate[]>([]);
 
   const [
     selectedCandidateId,
@@ -89,25 +90,19 @@ export default function ReviewPage() {
         setIsMissionLoading(true);
         setErrorMessage("");
 
-        const data =
-          await getMissions();
+        const data = await getMissions();
 
         if (!isMounted) {
           return;
         }
 
-        setMissions(
-          data.missions
-        );
+        setMissions(data.missions);
 
-        if (
-          data.missions.length > 0
-        ) {
+        if (data.missions.length > 0) {
           setSelectedMissionId(
             (current) =>
               current ||
-              data.missions[0]
-                .mission_id
+              data.missions[0].mission_id
           );
         }
       } catch (error) {
@@ -122,9 +117,7 @@ export default function ReviewPage() {
         );
       } finally {
         if (isMounted) {
-          setIsMissionLoading(
-            false
-          );
+          setIsMissionLoading(false);
         }
       }
     };
@@ -140,13 +133,12 @@ export default function ReviewPage() {
   const loadReviewCandidates =
     useCallback(
       async (
-        missionId: string
+        missionId: string,
+        preferredCandidateId?: string
       ) => {
         if (!missionId) {
           setCandidates([]);
-          setSelectedCandidateId(
-            ""
-          );
+          setSelectedCandidateId("");
           return;
         }
 
@@ -159,19 +151,25 @@ export default function ReviewPage() {
               missionId
             );
 
-          setCandidates(
-            data.candidates
-          );
+          setCandidates(data.candidates);
+
+          const preferredCandidate =
+            preferredCandidateId
+              ? data.candidates.find(
+                  (candidate) =>
+                    candidate.candidate_id ===
+                    preferredCandidateId
+                )
+              : null;
 
           setSelectedCandidateId(
-            data.candidates[0]
-              ?.candidate_id ?? ""
+            preferredCandidate?.candidate_id ??
+              data.candidates[0]?.candidate_id ??
+              ""
           );
         } catch (error) {
           setCandidates([]);
-          setSelectedCandidateId(
-            ""
-          );
+          setSelectedCandidateId("");
 
           setErrorMessage(
             error instanceof Error
@@ -179,14 +177,13 @@ export default function ReviewPage() {
               : "Review Candidate 조회에 실패했습니다."
           );
         } finally {
-          setIsReviewLoading(
-            false
-          );
+          setIsReviewLoading(false);
         }
       },
       []
     );
 
+  // Mission 변경
   useEffect(() => {
     if (!selectedMissionId) {
       setCandidates([]);
@@ -204,7 +201,7 @@ export default function ReviewPage() {
     loadReviewCandidates,
   ]);
 
-  // 현재 선택 Candidate
+  // 선택 Candidate
   const selectedCandidate =
     useMemo(() => {
       return (
@@ -221,7 +218,7 @@ export default function ReviewPage() {
       selectedCandidateId,
     ]);
 
-  // 기존 Synthesis가 없으면 새로 생성
+  // Synthesis 조회 또는 생성
   const getOrCreateSynthesisId =
     async (
       candidate: KnowledgeReviewCandidate
@@ -242,7 +239,7 @@ export default function ReviewPage() {
       return synthesis.synthesis_id;
     };
 
-  // Accurate
+  // 승인
   const handleApprove = async () => {
     if (
       !selectedCandidate ||
@@ -268,6 +265,8 @@ export default function ReviewPage() {
         synthesisId,
         {
           decision: "APPROVE",
+          reason: "전문가 검토 승인",
+          validated_by: "changtest",
         }
       );
 
@@ -289,7 +288,57 @@ export default function ReviewPage() {
     }
   };
 
-  // Reject
+  // 수정
+  const handleSaveEdit = async (
+    payload: KnowledgeCandidateEditRequest
+  ) => {
+    if (
+      !selectedCandidate ||
+      processingAction
+    ) {
+      return;
+    }
+
+    const candidateId =
+      selectedCandidate.candidate_id;
+
+    try {
+      setProcessingAction("EDIT");
+      setErrorMessage("");
+      setInfoMessage("");
+
+      // Candidate 수정
+      await editKnowledgeCandidate(
+        candidateId,
+        payload
+      );
+
+      // 수정 내용으로 재-Synthesis
+      await synthesizeKnowledgeCandidate(
+        candidateId
+      );
+
+      setInfoMessage(
+        "지식 후보가 수정되었으며 Synthesis가 다시 생성되었습니다."
+      );
+
+      // 같은 Candidate 유지
+      await loadReviewCandidates(
+        selectedMissionId,
+        candidateId
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Knowledge Candidate 수정에 실패했습니다."
+      );
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  // 거절
   const handleReject = async () => {
     if (
       !selectedCandidate ||
@@ -315,6 +364,8 @@ export default function ReviewPage() {
         synthesisId,
         {
           decision: "REJECT",
+          reason: "전문가 검토 거절",
+          validated_by: "changtest",
         }
       );
 
@@ -336,32 +387,21 @@ export default function ReviewPage() {
     }
   };
 
-  // Edit API 구현 전
-  const handleEdit = () => {
-    setErrorMessage("");
-
-    setInfoMessage(
-      "Candidate Edit API 구현 후 수정 기능을 연동할 예정입니다."
-    );
-  };
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
       <div className="mx-auto max-w-[1500px] space-y-5">
-        {/* 화면 제목 */}
+        {/* 제목 */}
         <header className="px-1">
           <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
             Knowledge Review
           </h1>
 
           <p className="mt-1 text-sm font-semibold text-slate-500">
-            AI가 추출한 지식 후보를
-            검토하고 승인 여부를
-            결정합니다.
+            AI가 추출한 지식 후보를 검토하고 승인 여부를 결정합니다.
           </p>
         </header>
 
-        {/* Mission 선택 */}
+        {/* Mission */}
         <MissionSelector
           missions={missions}
           selectedMissionId={
@@ -414,8 +454,8 @@ export default function ReviewPage() {
             onApprove={
               handleApprove
             }
-            onEdit={
-              handleEdit
+            onSaveEdit={
+              handleSaveEdit
             }
             onReject={
               handleReject

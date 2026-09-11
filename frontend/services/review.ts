@@ -7,6 +7,16 @@ export type ReviewDecisionRule =
   | Record<string, unknown>
   | null;
 
+export type KnowledgeType =
+  | "FACT"
+  | "PRINCIPLE"
+  | "DECISION_RULE"
+  | "HEURISTIC"
+  | "EXCEPTION"
+  | "FAILURE_LESSON"
+  | "TRADE_OFF"
+  | "EXPERT_OPINION";
+
 export type KnowledgeReviewCandidate = {
   candidate_id: string;
   analysis_id: string;
@@ -39,6 +49,38 @@ export type KnowledgeReviewCandidateListResponse = {
   mission_id: string;
   total: number;
   candidates: KnowledgeReviewCandidate[];
+};
+
+// Candidate 수정
+export type KnowledgeCandidateEditRequest = {
+  statement?: string;
+  knowledge_type?: KnowledgeType;
+  context?: Record<string, unknown>;
+  decision_rule?: Record<string, unknown> | null;
+  rationale?: string | null;
+  exception?: string | null;
+  edit_reason?: string | null;
+  edited_by?: string | null;
+};
+
+export type KnowledgeCandidateEditResponse = {
+  candidate_id: string;
+  analysis_id: string;
+
+  statement: string;
+  knowledge_type: string;
+  context: Record<string, unknown>;
+  decision_rule: Record<string, unknown> | null;
+  rationale: string | null;
+  exception: string | null;
+
+  validation_status: string;
+  review_status: string;
+  review_reason: string | null;
+  review_synthesis_id: string | null;
+
+  invalidated_synthesis_ids: string[];
+  resynthesis_required: boolean;
 };
 
 export type KnowledgeSynthesisRequest = {
@@ -94,8 +136,8 @@ export type SynthesisDecision =
 
 export type KnowledgeSynthesisValidationRequest = {
   decision: SynthesisDecision;
-  reason?: string | null;
-  validated_by?: string | null;
+  reason: string | null;
+  validated_by: string | null;
 };
 
 export type AppliedKnowledgeUnit = {
@@ -120,6 +162,7 @@ export type KnowledgeSynthesisValidationResponse = {
   validated_by: string | null;
 };
 
+// Backend 오류 메시지
 async function getErrorMessage(
   response: Response,
   fallbackMessage: string
@@ -137,7 +180,7 @@ async function getErrorMessage(
   }
 }
 
-// Mission 기준 Review Candidate 조회
+// Review Candidate 조회
 export async function getMissionReviewCandidates(
   missionId: string
 ): Promise<KnowledgeReviewCandidateListResponse> {
@@ -157,6 +200,34 @@ export async function getMissionReviewCandidates(
       await getErrorMessage(
         response,
         "Review Candidate 목록 조회에 실패했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Candidate 수정
+export async function editKnowledgeCandidate(
+  candidateId: string,
+  payload: KnowledgeCandidateEditRequest
+): Promise<KnowledgeCandidateEditResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/knowledge-candidates/${candidateId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Knowledge Candidate 수정에 실패했습니다."
       )
     );
   }
