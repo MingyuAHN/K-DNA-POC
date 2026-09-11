@@ -168,6 +168,7 @@ export default function ConflictPage() {
 
     const params = new URLSearchParams({
       missionId: selectedMissionId,
+      interviewId: selectedConflict.interview_id,
       conflictId: selectedConflict.conflict_id,
       question: selectedConflict.recommended_question,
     });

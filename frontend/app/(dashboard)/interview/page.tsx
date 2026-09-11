@@ -51,6 +51,13 @@ function InterviewPageContent() {
   const queryInterviewId =
     searchParams.get("interviewId");
 
+  // ✅ Conflict / Gap 화면에서 전달받은 값
+  const queryConflictId =
+    searchParams.get("conflictId");
+
+  const queryQuestion =
+    searchParams.get("question");
+
   // Interview
   const [
     interviews,
@@ -232,6 +239,18 @@ function InterviewPageContent() {
       selectedInterviewId,
     ]);
 
+  // ✅ Conflict / Gap 추천 질문을 입력창에 자동 반영
+  useEffect(() => {
+    if (!queryQuestion) {
+      return;
+    }
+
+    setMessage(queryQuestion);
+  }, [
+    queryConflictId,
+    queryQuestion,
+  ]);
+
   // Live Insight 복원
   useEffect(() => {
     if (!selectedInterviewId) {
@@ -388,12 +407,30 @@ function InterviewPageContent() {
           nextInterview.interview_id !==
           queryInterviewId
         ) {
+          // ✅ Interview 자동 선택 시 추천 질문 Context 유지
+          const params =
+            new URLSearchParams({
+              missionId,
+              interviewId:
+                nextInterview.interview_id,
+            });
+
+          if (queryConflictId) {
+            params.set(
+              "conflictId",
+              queryConflictId
+            );
+          }
+
+          if (queryQuestion) {
+            params.set(
+              "question",
+              queryQuestion
+            );
+          }
+
           router.replace(
-            `/interview?missionId=${encodeURIComponent(
-              missionId
-            )}&interviewId=${encodeURIComponent(
-              nextInterview.interview_id
-            )}`
+            `/interview?${params.toString()}`
           );
         }
       } catch (error) {
@@ -413,6 +450,8 @@ function InterviewPageContent() {
     }, [
       missionId,
       queryInterviewId,
+      queryConflictId,
+      queryQuestion,
       router,
       selectedInterviewId,
     ]);
@@ -505,6 +544,7 @@ function InterviewPageContent() {
       false
     );
 
+    // Interview 직접 변경 시 기존 Conflict 질문 Context 제거
     router.replace(
       `/interview?missionId=${encodeURIComponent(
         missionId
