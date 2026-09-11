@@ -179,6 +179,25 @@ def _get_requested_existing_knowledge_ids(synthesis: KnowledgeSynthesis) -> list
 def _get_synthesis_unit_count(db: Session, synthesis: KnowledgeSynthesis) -> int:
     return int(db.query(KnowledgeSynthesisUnit).filter(KnowledgeSynthesisUnit.synthesis_id == synthesis.synthesis_id).count())
 
+def _mark_review_required(
+    db: Session,
+    candidate: KnowledgeCandidate,
+    reason: str,
+    synthesis_id: uuid.UUID | None,
+) -> None:
+    """
+    Auto Sync가 사람 검토로 넘긴 상태를 DB에 영속화한다.
+
+    review_synthesis_id:
+    - Low confidence 단계처럼 Synthesis 전이면 None
+    - Guardrail 단계처럼 Synthesis 후면 해당 synthesis_id
+    """
+    candidate.review_status = "REVIEW_REQUIRED"
+    candidate.review_reason = reason
+    candidate.review_synthesis_id = synthesis_id
+    db.commit()
+    db.refresh(candidate)
+
 # --- Auto-operation normalization and safety ---
 def _normalize_auto_operation(db: Session, synthesis: KnowledgeSynthesis) -> str | None:
     """
@@ -317,8 +336,18 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                 continue
             confidence_score = float(candidate.confidence_score) if candidate.confidence_score is not None else 0.0
             if confidence_score < AUTO_MIN_CONFIDENCE_SCORE:
+                review_reason = (
+                    f'Candidate confidence {confidence_score:.2f} is below '
+                    f'automatic approval threshold {AUTO_MIN_CONFIDENCE_SCORE:.2f}'
+                )
+                _mark_review_required(
+                    db=db,
+                    candidate=candidate,
+                    reason=review_reason,
+                    synthesis_id=None,
+                )
                 review_required += 1
-                items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=None, resulting_knowledge_ids=[], detail=f'Candidate confidence {confidence_score:.2f} is below automatic approval threshold {AUTO_MIN_CONFIDENCE_SCORE:.2f}'))
+                items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=None, resulting_knowledge_ids=[], detail=review_reason))
                 continue
             if _has_human_rejected_synthesis(syntheses):
                 skipped += 1
@@ -353,8 +382,18 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                         detail_messages.append(normalization_detail)
                     safe, safety_reason = _check_auto_apply_safety(db=db, synthesis=synthesis)
             if not safe:
+                review_reason = (
+                    safety_reason
+                    or 'Automatic apply guardrail requires manual review'
+                )
+                _mark_review_required(
+                    db=db,
+                    candidate=candidate,
+                    reason=review_reason,
+                    synthesis_id=synthesis_id,
+                )
                 review_required += 1
-                items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=synthesis_id, resulting_knowledge_ids=[], detail=safety_reason))
+                items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=synthesis_id, resulting_knowledge_ids=[], detail=review_reason))
                 continue
             apply_result = validate_and_apply_synthesis(db=db, synthesis_id=synthesis_id, request=KnowledgeSynthesisValidationRequest(decision='APPROVE', reason=AUTO_VALIDATION_REASON, validated_by=AUTO_VALIDATED_BY))
             processed += 1

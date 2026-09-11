@@ -1,5 +1,5 @@
-# Safe refactor: behavior intentionally unchanged.
-# Duplicate detection combines lexical, context, semantic, and evidence-reuse logic.
+# Duplicate detection combines lexical, context, semantic, polarity-safety,
+# and evidence-reuse logic.
 
 import logging
 import math
@@ -38,6 +38,17 @@ RULE_LIKE_KNOWLEDGE_TYPES = {'PRINCIPLE', 'DECISION_RULE', 'HEURISTIC'}
 STRICT_CONTEXT_KEYS = ('project',)
 FUZZY_CONTEXT_KEYS = ('domain', 'phase')
 NEGATION_MARKERS = ('않', '아니', '없', '불가', '불가능', '금지')
+HARD_NEGATION_MARKERS = ('금지', '불가', '불가능', '해서는 안', '하면 안', '하지 말', '말아야')
+INSUFFICIENCY_MARKERS = ('부족', '충분하지', '충분치', '만으로는 어렵', '만으로 어렵')
+SUFFICIENCY_MARKERS = ('충분하다', '충분함', '충분조건', '충족한다', '충족되면')
+INSUFFICIENCY_DECISION_VERBS = ('결정', '판단', '확정', '정당화')
+POLARITY_MIN_SEQUENCE_RATIO = 0.58
+POLARITY_MIN_BIDIRECTIONAL_TOKEN_CONTAINMENT = 0.45
+POLARITY_MIN_BIDIRECTIONAL_CHAR_CONTAINMENT = 0.45
+INSUFFICIENCY_SUBCLAIM_MAX_LENGTH_RATIO = 0.8
+INSUFFICIENCY_SUBCLAIM_MIN_TAG_OVERLAP = 2
+INSUFFICIENCY_SUBCLAIM_MIN_TOKEN_CONTAINMENT = 0.35
+INSUFFICIENCY_SUBCLAIM_MIN_CHAR_CONTAINMENT = 0.35
 EXCEPTION_MARKERS = ('다만', '예외', '반대로', '경우에는', '때에는', 'unless')
 
 # --- Result / metric models ---
@@ -233,14 +244,105 @@ def _contains_any_marker(value: str | None, markers: tuple[str, ...]) -> bool:
     compact = normalized.replace(' ', '')
     return any((_compact_text(marker) in compact for marker in markers if _compact_text(marker)))
 
+def _expresses_insufficient_condition(value: str | None) -> bool:
+    """
+    "A만으로는 부족하다", "A만으로 결정하지 않는다"처럼
+    특정 조건만으로는 충분하지 않다는 의미를 감지한다.
+
+    이런 표현은 문장에 부정어가 있어도 핵심 결론 자체를
+    반대로 뒤집는 부정과는 다르므로 별도로 취급한다.
+    """
+    compact = _compact_text(value)
+    if not compact:
+        return False
+
+    if any(_compact_text(marker) in compact for marker in INSUFFICIENCY_MARKERS):
+        return True
+
+    if '만으로' not in compact:
+        return False
+
+    if '어렵' in compact or '곤란' in compact:
+        return True
+
+    return any(
+        f'{verb}하지않' in compact
+        or f'{verb}할수없' in compact
+        for verb in INSUFFICIENCY_DECISION_VERBS
+    )
+
+def _expresses_sufficient_condition(value: str | None) -> bool:
+    """
+    특정 조건만으로 충분하다는 명시적 표현을 감지한다.
+
+    "A만으로 결정한다" / "A만으로 판단할 수 있다"처럼
+    insufficiency 표현과 직접 반대되는 경우도 감지한다.
+    """
+    compact = _compact_text(value)
+    if not compact:
+        return False
+
+    if _expresses_insufficient_condition(value):
+        return False
+
+    if any(_compact_text(marker) in compact for marker in SUFFICIENCY_MARKERS):
+        return True
+
+    if '만으로' not in compact:
+        return False
+
+    return any(verb in compact for verb in INSUFFICIENCY_DECISION_VERBS)
+
 def _has_polarity_mismatch(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) -> bool:
     """
     Embedding은 긍정/부정 문장을 가깝게 볼 수 있으므로
-    한쪽에만 강한 부정 표지가 있으면 중복으로 합치지 않는다.
+    실제로 결론 방향이 반대인 경우에는 Duplicate로 합치지 않는다.
+
+    다만 "A만으로 결정하지 않는다"와 "A만으로는 부족하다"처럼
+    같은 불충분성을 서로 다른 표현으로 설명한 경우는
+    polarity mismatch로 보지 않는다.
     """
+    candidate_insufficient = _expresses_insufficient_condition(candidate.statement)
+    knowledge_insufficient = _expresses_insufficient_condition(knowledge.statement)
+    candidate_sufficient = _expresses_sufficient_condition(candidate.statement)
+    knowledge_sufficient = _expresses_sufficient_condition(knowledge.statement)
+
+    if (candidate_insufficient and knowledge_sufficient) or (knowledge_insufficient and candidate_sufficient):
+        return True
+
+    candidate_hard_negative = _contains_any_marker(candidate.statement, HARD_NEGATION_MARKERS)
+    knowledge_hard_negative = _contains_any_marker(knowledge.statement, HARD_NEGATION_MARKERS)
+
+    if candidate_hard_negative != knowledge_hard_negative:
+        if candidate_hard_negative or knowledge_hard_negative:
+            return True
+
+    # "A만으로는 부족하다" 같은 insufficiency는 문장의 전체 결론을
+    # 부정하는 것이 아니라 조건의 불충분성을 설명하는 qualifier다.
+    # 한쪽에만 insufficiency가 있고 상대가 그 조건을 명시적으로
+    # 충분하다고 주장하지 않는다면 semantic duplicate 비교를 허용한다.
+    if candidate_insufficient or knowledge_insufficient:
+        return False
+
     candidate_negative = _contains_any_marker(candidate.statement, NEGATION_MARKERS)
     knowledge_negative = _contains_any_marker(knowledge.statement, NEGATION_MARKERS)
-    return candidate_negative != knowledge_negative
+
+    if candidate_negative == knowledge_negative:
+        return False
+
+    sequence_ratio = _sequence_ratio(candidate.statement, knowledge.statement)
+    candidate_to_knowledge_token = _token_containment(candidate.statement, knowledge.statement)
+    knowledge_to_candidate_token = _token_containment(knowledge.statement, candidate.statement)
+    bidirectional_token_containment = min(candidate_to_knowledge_token, knowledge_to_candidate_token)
+    candidate_to_knowledge_char = _char_containment(candidate.statement, knowledge.statement)
+    knowledge_to_candidate_char = _char_containment(knowledge.statement, candidate.statement)
+    bidirectional_char_containment = min(candidate_to_knowledge_char, knowledge_to_candidate_char)
+
+    return (
+        sequence_ratio >= POLARITY_MIN_SEQUENCE_RATIO
+        or bidirectional_token_containment >= POLARITY_MIN_BIDIRECTIONAL_TOKEN_CONTAINMENT
+        or bidirectional_char_containment >= POLARITY_MIN_BIDIRECTIONAL_CHAR_CONTAINMENT
+    )
 
 def _candidate_adds_exception_signal(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) -> bool:
     """
@@ -262,16 +364,29 @@ def _types_are_duplicate_compatible(candidate: KnowledgeCandidate, knowledge: Kn
 
 # --- Tag / cheap ranking helpers ---
 def _tag_token_set(context: dict | None) -> set[str]:
+    """
+    Duplicate 구조 신호용 Context 토큰을 만든다.
+
+    AI는 같은 의미를 어떤 Turn에서는 tags에, 다른 Turn에서는
+    constraints에 넣을 수 있으므로 둘을 함께 사용한다.
+    이 값은 단독 Duplicate 판정이 아니라 semantic/lexical 판정의
+    보조 신호로만 사용된다.
+    """
     if not context:
         return set()
-    tags = context.get('tags', [])
-    if not isinstance(tags, list):
-        return set()
+
     result: set[str] = set()
-    for tag in tags:
-        if not isinstance(tag, str):
+
+    for key in ('tags', 'constraints'):
+        values = context.get(key, [])
+        if not isinstance(values, list):
             continue
-        result.update(_token_set(tag))
+
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            result.update(_token_set(value))
+
     return result
 
 def _tag_overlap_count(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) -> int:
@@ -281,6 +396,43 @@ def _tag_overlap_count(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) 
 
 def _build_metrics(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) -> _SimilarityMetrics:
     return _SimilarityMetrics(knowledge=knowledge, sequence_ratio=_sequence_ratio(candidate.statement, knowledge.statement), token_jaccard=_token_jaccard(candidate.statement, knowledge.statement), token_containment=_token_containment(candidate.statement, knowledge.statement), char_containment=_char_containment(candidate.statement, knowledge.statement), length_ratio=_statement_length_ratio(candidate.statement, knowledge.statement), tag_overlap_count=_tag_overlap_count(candidate=candidate, knowledge=knowledge), same_type=candidate.knowledge_type == knowledge.knowledge_type)
+
+def _is_contained_insufficiency_duplicate(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+    metrics: _SimilarityMetrics,
+) -> bool:
+    """
+    기존 Knowledge가 이미 더 풍부한 형태로 "A만으로는 부족하다"는
+    명제를 포함하고 있고 Candidate가 그 일부 명제만 다시 진술한 경우를
+    Duplicate로 억제한다.
+
+    실제 Interview에서는 하나의 답변에서 AI가:
+    - "운영 자립성이 확보되면 DB 분리"
+    - "소유권/직접 쓰기 정리만으로는 부족"
+    처럼 하나의 기존 Knowledge를 두 Candidate로 분리할 수 있다.
+
+    이때 짧은 insufficiency Candidate가 기존의 더 풍부한 Knowledge에
+    이미 포함되어 있으면 별도 Version을 만들 필요가 없다.
+
+    안전장치:
+    - Candidate와 Knowledge가 모두 insufficiency를 표현해야 한다.
+    - Candidate가 기존 Knowledge보다 짧은 sub-claim이어야 한다.
+    - Context tag/constraint와 lexical containment가 함께 뒷받침되어야 한다.
+    - 예외/분기 추가 여부는 이 함수 전에 별도로 차단한다.
+    """
+    if not _expresses_insufficient_condition(candidate.statement):
+        return False
+    if not _expresses_insufficient_condition(knowledge.statement):
+        return False
+    if metrics.length_ratio > INSUFFICIENCY_SUBCLAIM_MAX_LENGTH_RATIO:
+        return False
+    if metrics.tag_overlap_count < INSUFFICIENCY_SUBCLAIM_MIN_TAG_OVERLAP:
+        return False
+    return (
+        metrics.token_containment >= INSUFFICIENCY_SUBCLAIM_MIN_TOKEN_CONTAINMENT
+        and metrics.char_containment >= INSUFFICIENCY_SUBCLAIM_MIN_CHAR_CONTAINMENT
+    )
 
 def _cheap_rank_score(metrics: _SimilarityMetrics) -> float:
     tag_score = min(metrics.tag_overlap_count / 3.0, 1.0)
@@ -405,6 +557,8 @@ def find_duplicate_active_knowledge(db: Session, mission_id: uuid.UUID, candidat
         metrics = _build_metrics(candidate=candidate, knowledge=knowledge)
         if candidate_normalized and candidate_normalized == knowledge_normalized:
             return DuplicateKnowledgeMatch(knowledge=knowledge, match_type='EXACT', sequence_ratio=1.0, token_jaccard=1.0, token_containment=1.0, char_containment=1.0, semantic_similarity=None, combined_score=1.0, tag_overlap_count=metrics.tag_overlap_count)
+        if _is_contained_insufficiency_duplicate(candidate=candidate, knowledge=knowledge, metrics=metrics):
+            return DuplicateKnowledgeMatch(knowledge=knowledge, match_type='INSUFFICIENCY_CONTAINMENT', sequence_ratio=metrics.sequence_ratio, token_jaccard=metrics.token_jaccard, token_containment=metrics.token_containment, char_containment=metrics.char_containment, semantic_similarity=None, combined_score=_cheap_rank_score(metrics), tag_overlap_count=metrics.tag_overlap_count)
         compatible_metrics.append(metrics)
     if not compatible_metrics:
         return None

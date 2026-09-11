@@ -14,8 +14,8 @@ from app.models.mission import Mission
 from app.schemas.baseline_claim import (
     BaselineClaimExtractionRequest,
     BaselineClaimExtractionResponse,
-    ClaimExtractionContext,
-    ClaimSource,
+    BaselineSource,
+    ContextTags,
 )
 from app.services.document_chunk_service import (
     get_document_chunk,
@@ -32,11 +32,38 @@ ALLOWED_CLAIM_TYPES = {
 }
 
 
+def _build_request(
+    chunk: DocumentChunk,
+    document: Document,
+    mission: Mission,
+) -> BaselineClaimExtractionRequest:
+    """
+    Baseline Claim Extraction v1.0 Contract를 한 곳에서 조립한다.
+
+    Mission에는 현재 domain/objective가 있지만, v1.0 ContextTags에는
+    objective가 포함되지 않는다. 따라서 domain만 전달하고 나머지
+    ContextTags 필드는 null / [] 기본값을 사용한다.
+    """
+
+    return BaselineClaimExtractionRequest(
+        schema_version="1.0",
+        chunk_id=chunk.chunk_id,
+        content=chunk.content,
+        source=BaselineSource(
+            file_name=document.file_name,
+            page=chunk.page_number,
+            section=chunk.section,
+        ),
+        context=ContextTags(
+            domain=mission.domain,
+        ),
+    )
+
+
 def build_claim_extraction_request(
     db: Session,
     chunk_id: uuid.UUID,
 ) -> BaselineClaimExtractionRequest:
-
     chunk = get_document_chunk(
         db=db,
         chunk_id=chunk_id,
@@ -78,18 +105,10 @@ def build_claim_extraction_request(
             detail="Mission not found",
         )
 
-    return BaselineClaimExtractionRequest(
-        chunk_id=chunk.chunk_id,
-        content=chunk.content,
-        source=ClaimSource(
-            file_name=document.file_name,
-            page=chunk.page_number,
-            section=chunk.section,
-        ),
-        context=ClaimExtractionContext(
-            domain=mission.domain,
-            objective=mission.objective,
-        ),
+    return _build_request(
+        chunk=chunk,
+        document=document,
+        mission=mission,
     )
 
 
@@ -97,7 +116,6 @@ def validate_ai_result(
     chunk: DocumentChunk,
     result: BaselineClaimExtractionResponse,
 ) -> None:
-
     if result.chunk_id != chunk.chunk_id:
         raise ValueError(
             "AI response chunk_id does not match "
@@ -105,7 +123,6 @@ def validate_ai_result(
         )
 
     for claim in result.claims:
-
         if claim.claim_type not in ALLOWED_CLAIM_TYPES:
             raise ValueError(
                 "Unsupported claim type: "
@@ -128,7 +145,6 @@ def save_extracted_claims(
     db: Session,
     result: BaselineClaimExtractionResponse,
 ) -> list[BaselineClaim]:
-
     chunk = get_document_chunk(
         db=db,
         chunk_id=result.chunk_id,
@@ -171,7 +187,6 @@ def save_extracted_claims(
         saved_claims: list[BaselineClaim] = []
 
         for claim in result.claims:
-
             row = BaselineClaim(
                 mission_id=document.mission_id,
                 source_chunk_id=claim.source_chunk_id,
@@ -211,7 +226,6 @@ def extract_document_claims(
     db: Session,
     document_id: uuid.UUID,
 ) -> list[BaselineClaim]:
-
     document = get_document(
         db=db,
         document_id=document_id,
@@ -253,41 +267,22 @@ def extract_document_claims(
         )
 
     try:
-        # ----------------------------------------
         # 1. 처리 상태 변경
-        # ----------------------------------------
-        document.processing_status = (
-            "CLAIM_EXTRACTING"
-        )
+        document.processing_status = "CLAIM_EXTRACTING"
         document.processing_error = None
-
         db.commit()
 
-        # ----------------------------------------
-        # 2. 먼저 모든 Chunk에 대해 AI 호출
-        #
-        # DB 저장 전에 모든 AI 결과를 받아놓는다.
-        # 중간 실패 시 일부 Claim만 저장되는 것을
-        # 최대한 방지하기 위한 구조.
-        # ----------------------------------------
+        # 2. 모든 Chunk의 AI 결과를 먼저 수집한다.
+        #    중간 실패 시 일부 Claim만 저장되는 것을 방지한다.
         extraction_results: list[
             BaselineClaimExtractionResponse
         ] = []
 
         for chunk in chunks:
-
-            request = BaselineClaimExtractionRequest(
-                chunk_id=chunk.chunk_id,
-                content=chunk.content,
-                source=ClaimSource(
-                    file_name=document.file_name,
-                    page=chunk.page_number,
-                    section=chunk.section,
-                ),
-                context=ClaimExtractionContext(
-                    domain=mission.domain,
-                    objective=mission.objective,
-                ),
+            request = _build_request(
+                chunk=chunk,
+                document=document,
+                mission=mission,
             )
 
             result = (
@@ -303,10 +298,7 @@ def extract_document_claims(
 
             extraction_results.append(result)
 
-        # ----------------------------------------
-        # 3. AI 호출이 전부 성공한 뒤
-        # 기존 Claim을 한 번에 제거
-        # ----------------------------------------
+        # 3. AI 호출이 전부 성공한 뒤 기존 Claim을 한 번에 제거한다.
         chunk_ids = [
             chunk.chunk_id
             for chunk in chunks
@@ -324,15 +316,11 @@ def extract_document_claims(
             )
         )
 
-        # ----------------------------------------
         # 4. 새로운 Claim 전체 저장
-        # ----------------------------------------
         saved_claims: list[BaselineClaim] = []
 
         for result in extraction_results:
-
             for claim in result.claims:
-
                 row = BaselineClaim(
                     mission_id=document.mission_id,
                     source_chunk_id=claim.source_chunk_id,
@@ -346,9 +334,7 @@ def extract_document_claims(
                 db.add(row)
                 saved_claims.append(row)
 
-        document.processing_status = (
-            "CLAIMS_EXTRACTED"
-        )
+        document.processing_status = "CLAIMS_EXTRACTED"
         document.processing_error = None
 
         db.commit()

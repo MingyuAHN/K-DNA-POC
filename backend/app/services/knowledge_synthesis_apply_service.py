@@ -356,8 +356,21 @@ def validate_and_apply_synthesis(
 
         synthesis.validated_at = now
 
+        # REVIEW_REQUIRED Candidate를 사람이 Reject한 경우
+        # Review Queue에서 종료 상태로 이동시킨다.
+        #
+        # Auto retry용 Reject는 review_status가 아직
+        # REVIEW_REQUIRED가 아니므로 이 분기에 영향을 받지 않는다.
+        if candidate.review_status == "REVIEW_REQUIRED":
+            candidate.review_status = "REJECTED"
+            candidate.review_synthesis_id = synthesis.synthesis_id
+
+            if request.reason:
+                candidate.review_reason = request.reason
+
         db.commit()
         db.refresh(synthesis)
+        db.refresh(candidate)
 
         return KnowledgeSynthesisValidationResponse(
             synthesis_id=(
@@ -705,6 +718,15 @@ def validate_and_apply_synthesis(
         candidate.validation_status = (
             "VERIFIED"
         )
+
+        # 사람이 Review Queue에서 승인한 Candidate라면
+        # Review 상태도 함께 종료한다.
+        if candidate.review_status == "REVIEW_REQUIRED":
+            candidate.review_status = "RESOLVED"
+            candidate.review_synthesis_id = synthesis.synthesis_id
+
+            if request.reason:
+                candidate.review_reason = request.reason
 
         # --------------------------------------------------
         # Synthesis 완료

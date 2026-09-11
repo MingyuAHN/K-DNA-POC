@@ -15,11 +15,17 @@ from app.schemas.knowledge import (
     KnowledgeUnitResponse,
     ValidationResponse,
 )
+from app.schemas.knowledge_review import (
+    KnowledgeReviewCandidateListResponse,
+)
 from app.services.knowledge_service import (
     get_knowledge_evidence,
     get_knowledge_unit,
     get_mission_knowledge_units,
     validate_knowledge_candidate,
+)
+from app.services.knowledge_review_service import (
+    get_mission_review_candidates,
 )
 
 
@@ -54,6 +60,20 @@ def validate_candidate_api(
         reason=validation.reason,
         validated_by=validation.validated_by,
         knowledge_unit=knowledge_unit,
+    )
+
+
+@router.get(
+    "/missions/{mission_id}/knowledge-review-candidates",
+    response_model=KnowledgeReviewCandidateListResponse,
+)
+def get_mission_review_candidates_api(
+    mission_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    return get_mission_review_candidates(
+        db=db,
+        mission_id=mission_id,
     )
 
 

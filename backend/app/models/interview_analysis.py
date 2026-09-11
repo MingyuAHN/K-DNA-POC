@@ -161,6 +161,27 @@ class KnowledgeCandidate(Base):
         default="CANDIDATE",
     )
 
+    review_status: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+
+    review_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    review_synthesis_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "knowledge_synthesis.synthesis_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

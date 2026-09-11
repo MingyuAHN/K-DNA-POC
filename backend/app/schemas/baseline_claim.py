@@ -1,28 +1,39 @@
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class ClaimSource(BaseModel):
+class ContextTags(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str | None = None
+    project: str | None = None
+    phase: str | None = None
+    system: str | None = None
+    scope: str | None = None
+    time: str | None = None
+
+    constraints: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class BaselineSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     file_name: str
     page: int | None = None
     section: str | None = None
 
 
-class ClaimExtractionContext(BaseModel):
-    domain: str
-    objective: str | None = None
-
-
 class BaselineClaimExtractionRequest(BaseModel):
-    schema_version: str = "1.0"
+    model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal["1.0"]
     chunk_id: uuid.UUID
     content: str
-
-    source: ClaimSource
-    context: ClaimExtractionContext
+    source: BaselineSource
+    context: ContextTags
 
 
 class ExtractedClaim(BaseModel):
@@ -44,7 +55,7 @@ class ExtractedClaim(BaseModel):
 
 
 class BaselineClaimExtractionResponse(BaseModel):
-    schema_version: str = "1.0"
+    schema_version: Literal["1.0"]
 
     chunk_id: uuid.UUID
     claims: list[ExtractedClaim]
@@ -83,3 +94,9 @@ class DocumentClaimExtractionResponse(BaseModel):
     extracted_claim_count: int
 
     claims: list[SavedBaselineClaim]
+
+
+# Transitional aliases for existing backend imports.
+# New code should use BaselineSource / ContextTags.
+ClaimSource = BaselineSource
+ClaimExtractionContext = ContextTags
