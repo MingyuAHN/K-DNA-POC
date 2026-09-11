@@ -13,6 +13,7 @@ import {
   createMission,
   getMissions,
   uploadMissionDocument,
+  processMissionDocument,
   type MissionResponse,
 } from "@/services/mission";
 
@@ -240,13 +241,18 @@ export default function MissionPage() {
       const missionId =
         createdMission.mission_id;
 
-      // Seed 문서 업로드
+      // Seed 업로드 + 전처리
       for (
         const file of values.files
       ) {
-        await uploadMissionDocument(
-          missionId,
-          file
+        const uploadedDocument =
+          await uploadMissionDocument(
+            missionId,
+            file
+          );
+
+        await processMissionDocument(
+          uploadedDocument.document_id
         );
       }
 
@@ -274,9 +280,10 @@ export default function MissionPage() {
         );
 
       setSubmitMessage(
-        "미션, 전문가 및 인터뷰 생성이 완료되었습니다."
+        "미션, Seed 전처리, 전문가 및 인터뷰 생성이 완료되었습니다."
       );
 
+      // Interview 이동
       router.push(
         `/interview?missionId=${encodeURIComponent(
           missionId

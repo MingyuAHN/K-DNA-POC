@@ -33,7 +33,54 @@ export type MissionDocumentResponse = {
   updated_at: string;
 };
 
-// Backend 오류 응답 메시지 추출
+export type DocumentParseResponse = {
+  document_id: string;
+  processing_status: string;
+  raw_text_length: number;
+  raw_text_preview: string;
+};
+
+export type DocumentChunkResponse = {
+  document_id: string;
+  processing_status: string;
+  chunk_count: number;
+  chunks: Array<{
+    chunk_id: string;
+    seq: number;
+    content_preview: string;
+  }>;
+};
+
+export type DocumentClaimExtractionResponse = {
+  schema_version: string;
+  document_id: string;
+  processing_status: string;
+  chunk_count: number;
+  extracted_claim_count: number;
+  claims: Array<{
+    claim_id: string;
+    mission_id: string;
+    source_chunk_id: string;
+    claim_type: string;
+    statement: string;
+    context: Record<string, unknown>;
+    source_text: string | null;
+    confidence_score: number | null;
+  }>;
+};
+
+export type DocumentEmbeddingResponse = {
+  document_id: string;
+  processing_status: string;
+  model: string;
+  dimension: number;
+  chunk_total: number;
+  chunk_embedded: number;
+  baseline_claim_total: number;
+  baseline_claim_embedded: number;
+};
+
+// Backend 오류 메시지 추출
 async function getErrorMessage(
   response: Response,
   fallbackMessage: string
@@ -116,14 +163,13 @@ export async function getMission(
   return response.json();
 }
 
-// Mission별 Seed 문서 업로드
+// Seed 문서 업로드
 export async function uploadMissionDocument(
   missionId: string,
   file: File
 ): Promise<MissionDocumentResponse> {
   const formData = new FormData();
 
-  // Backend multipart field명
   formData.append("file", file);
 
   const response = await fetch(
@@ -144,4 +190,115 @@ export async function uploadMissionDocument(
   }
 
   return response.json();
+}
+
+// 문서 Parsing
+export async function parseMissionDocument(
+  documentId: string
+): Promise<DocumentParseResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/documents/${documentId}/parse`,
+    {
+      method: "POST",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Seed 문서 Parsing 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// 문서 Chunk 생성
+export async function chunkMissionDocument(
+  documentId: string
+): Promise<DocumentChunkResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/documents/${documentId}/chunk`,
+    {
+      method: "POST",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Seed 문서 Chunk 생성 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Baseline Claim 추출
+export async function extractMissionDocumentClaims(
+  documentId: string
+): Promise<DocumentClaimExtractionResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/documents/${documentId}/claims/extract`,
+    {
+      method: "POST",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Seed 문서 Claim 추출 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Embedding 생성
+export async function generateMissionDocumentEmbeddings(
+  documentId: string
+): Promise<DocumentEmbeddingResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/documents/${documentId}/embeddings/generate`,
+    {
+      method: "POST",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(
+        response,
+        "Seed 문서 Embedding 생성 중 오류가 발생했습니다."
+      )
+    );
+  }
+
+  return response.json();
+}
+
+// Seed 전체 전처리
+export async function processMissionDocument(
+  documentId: string
+) {
+  console.log("PARSE START", documentId);
+  await parseMissionDocument(documentId);
+
+  console.log("CHUNK START", documentId);
+  await chunkMissionDocument(documentId);
+
+  console.log("CLAIMS START", documentId);
+  await extractMissionDocumentClaims(documentId);
+
+  console.log("EMBEDDINGS START", documentId);
+  await generateMissionDocumentEmbeddings(documentId);
+
+  console.log("PROCESS COMPLETE", documentId);
 }
