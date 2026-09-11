@@ -19,6 +19,9 @@ from app.schemas.interview_orchestration import (
 from app.services.auto_knowledge_sync_service import (
     sync_analysis_to_knowledge,
 )
+from app.services.conflict_normalization_service import (
+    normalize_interview_conflict_sources,
+)
 from app.services.interview_analysis_service import (
     save_interview_analysis,
 )
@@ -196,6 +199,22 @@ def run_interview_turn(
         )
 
         # -----------------------------------------------------
+        # 5-1. Frontend용 Conflict Source provenance 정규화
+        #
+        # AI 원본 ai_result 자체는 Audit을 위해
+        # save_interview_analysis()에 그대로 전달한다.
+        #
+        # Frontend Response만 source_id + retrieval context를
+        # 기준으로 정규화한다.
+        # -----------------------------------------------------
+        frontend_result = (
+            normalize_interview_conflict_sources(
+                result=ai_result,
+                request_context=ai_payload,
+            )
+        )
+
+        # -----------------------------------------------------
         # 6. AI 후속 질문 저장
         #
         # PoC 정책:
@@ -221,6 +240,13 @@ def run_interview_turn(
 
         # -----------------------------------------------------
         # 7. Candidate / Gap / Conflict / Question 저장
+        #
+        # raw_response:
+        #   AI 원본 유지
+        #
+        # ConflictSource DB:
+        #   save_interview_analysis 내부에서
+        #   provenance 정규화
         # -----------------------------------------------------
         analysis = save_interview_analysis(
             db=db,
@@ -258,18 +284,20 @@ def run_interview_turn(
             )
 
         # -----------------------------------------------------
-        # 9. Auto Knowledge Sync
+        # 9. Knowledge Sync
         #
         # 이번 Turn에서 생성된 Candidate들을 대상으로:
         #
         # Candidate
         #   → 관련 Knowledge 선별
+        #   → Duplicate / No-op Guard
         #   → Synthesis
         #   → Guardrail
-        #   → Auto APPROVE
-        #   → Knowledge Unit / Relation / Version
+        #   → 신규/실질 변경은 Human Review 대기
         #
-        # 을 자동 처리한다.
+        # Duplicate/No-op처럼 canonical knowledge가
+        # 변경되지 않는 경우만 기존 Knowledge를
+        # 자동 재사용할 수 있다.
         #
         # 중요:
         # Knowledge Sync 실패는 Interview Turn 자체를
@@ -334,8 +362,8 @@ def run_interview_turn(
 
         except Exception as sync_exc:
 
-            # Auto Knowledge Sync 과정에서
-            # 열린 트랜잭션이 남아 있을 가능성에 대비한다.
+            # Knowledge Sync 과정에서 열린
+            # 트랜잭션이 남아 있을 가능성에 대비한다.
             db.rollback()
 
             logger.exception(
@@ -355,11 +383,17 @@ def run_interview_turn(
         # -----------------------------------------------------
         # 10. Frontend 응답
         #
-        # Knowledge Sync 결과는 현재 Turn Response Schema에
-        # 추가하지 않는다.
+        # Conflict Source는 Backend provenance 표준으로:
         #
-        # /turns가 성공하면 Frontend는 기존
-        # knowledge-graph API를 다시 조회하면 된다.
+        # BASELINE_CLAIM
+        # KNOWLEDGE_UNIT
+        # EVIDENCE
+        #
+        # 를 반환한다.
+        #
+        # Cross-Analysis Conflict canonicalization은
+        # Mission Conflict 조회 API에서 수행한다.
+        # /turns는 현재 Analysis 결과만 반환한다.
         # -----------------------------------------------------
         return InterviewTurnResponse(
             analysis_id=analysis.analysis_id,
@@ -374,15 +408,22 @@ def run_interview_turn(
             ),
             user_message=user_message.content,
             knowledge_candidates=(
-                ai_result.knowledge_candidates
+                frontend_result
+                .knowledge_candidates
             ),
-            gaps=ai_result.gaps,
-            conflicts=ai_result.conflicts,
+            gaps=(
+                frontend_result.gaps
+            ),
+            conflicts=(
+                frontend_result.conflicts
+            ),
             question_candidates=(
-                ai_result.question_candidates
+                frontend_result
+                .question_candidates
             ),
             next_question=(
-                ai_result.next_question
+                frontend_result
+                .next_question
             ),
         )
 

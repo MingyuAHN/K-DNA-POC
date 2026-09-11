@@ -15,6 +15,9 @@ from app.models.interview_analysis import (
 from app.schemas.interview_orchestration import (
     InterviewOrchestrationResponse,
 )
+from app.services.conflict_normalization_service import (
+    resolve_conflict_source_type,
+)
 
 
 def save_interview_analysis(
@@ -41,6 +44,16 @@ def save_interview_analysis(
             db.delete(existing)
             db.flush()
 
+        # -------------------------------------------------
+        # raw_response는 AI가 실제 반환한 원본을
+        # 그대로 보존한다.
+        #
+        # 따라서 AI가 source_type="Knowledge"를
+        # 반환했다면 raw_response에는 그대로 남는다.
+        #
+        # 정규화된 provenance는 아래 ConflictSource
+        # 저장 단계에서 적용한다.
+        # -------------------------------------------------
         analysis = InterviewAnalysis(
             mission_id=mission_id,
             interview_id=interview_id,
@@ -123,13 +136,27 @@ def save_interview_analysis(
 
             for source in item.sources:
 
+                normalized_source_type = (
+                    resolve_conflict_source_type(
+                        source_type=(
+                            source.source_type
+                        ),
+                        source_id=(
+                            source.source_id
+                        ),
+                        request_context=(
+                            request_context
+                        ),
+                    )
+                )
+
                 db.add(
                     ConflictSource(
                         conflict_id=(
                             conflict.conflict_id
                         ),
                         source_type=(
-                            source.source_type
+                            normalized_source_type
                         ),
                         source_id=source.source_id,
                         content=source.content,

@@ -19,6 +19,9 @@ from app.schemas.interview_analysis import (
     StoredKnowledgeGap,
     StoredQuestionCandidate,
 )
+from app.services.conflict_normalization_service import (
+    resolve_conflict_source_type,
+)
 
 
 def decimal_to_float(
@@ -137,6 +140,11 @@ def get_interview_analysis_detail(
 
     conflicts = []
 
+    request_context = (
+        analysis.request_context
+        or {}
+    )
+
     for row in conflict_rows:
 
         source_rows = (
@@ -156,7 +164,19 @@ def get_interview_analysis_detail(
                 conflict_source_id=(
                     source.conflict_source_id
                 ),
-                source_type=source.source_type,
+                source_type=(
+                    resolve_conflict_source_type(
+                        source_type=(
+                            source.source_type
+                        ),
+                        source_id=(
+                            source.source_id
+                        ),
+                        request_context=(
+                            request_context
+                        ),
+                    )
+                ),
                 source_id=source.source_id,
                 content=source.content,
             )

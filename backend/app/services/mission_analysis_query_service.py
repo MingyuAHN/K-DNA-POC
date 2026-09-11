@@ -17,6 +17,11 @@ from app.schemas.mission_analysis import (
     MissionKnowledgeGapListResponse,
     MissionKnowledgeGapResponse,
 )
+from app.services.conflict_normalization_service import (
+    build_conflict_canonicalization_record,
+    resolve_conflict_source_type,
+    select_visible_conflict_ids,
+)
 from app.services.mission_service import get_mission
 
 
@@ -106,7 +111,15 @@ def get_mission_conflicts(
     Mission에 속한 모든 Interview에서 생성된
     Knowledge Conflict를 통합 조회한다.
 
-    Conflict Source도 함께 반환한다.
+    Detection History는 DB에 그대로 보존한다.
+
+    Mission Conflict 화면에서는:
+    - 동일 Conflict 반복 노출 억제
+    - atomic Conflict들의 단순 합집합인
+      composite Conflict 노출 억제
+    - Conflict Source provenance 정규화
+
+    를 적용한다.
 
     최신 Conflict부터 반환한다.
     """
@@ -160,12 +173,63 @@ def get_mission_conflicts(
         .all()
     )
 
+    analysis_by_conflict_id = {
+        conflict.conflict_id: analysis
+        for conflict, analysis in rows
+    }
+
     sources_by_conflict: dict[
         uuid.UUID,
         list[MissionConflictSourceResponse],
     ] = defaultdict(list)
 
+    canonical_sources_by_conflict: dict[
+        uuid.UUID,
+        list[
+            tuple[
+                str,
+                str | None,
+                str,
+            ]
+        ],
+    ] = defaultdict(list)
+
+    # -----------------------------------------------------
+    # Source provenance normalization
+    #
+    # 과거 DB에 source_type="Knowledge"로 저장되어 있어도
+    # 해당 Analysis의 request_context를 통해
+    # BASELINE_CLAIM / KNOWLEDGE_UNIT / EVIDENCE를
+    # 재판별한다.
+    # -----------------------------------------------------
     for source in source_rows:
+        analysis = (
+            analysis_by_conflict_id.get(
+                source.conflict_id
+            )
+        )
+
+        request_context = (
+            analysis.request_context
+            if analysis is not None
+            and analysis.request_context
+            else {}
+        )
+
+        normalized_source_type = (
+            resolve_conflict_source_type(
+                source_type=(
+                    source.source_type
+                ),
+                source_id=(
+                    source.source_id
+                ),
+                request_context=(
+                    request_context
+                ),
+            )
+        )
+
         sources_by_conflict[
             source.conflict_id
         ].append(
@@ -173,16 +237,70 @@ def get_mission_conflicts(
                 conflict_source_id=(
                     source.conflict_source_id
                 ),
-                source_type=source.source_type,
+                source_type=(
+                    normalized_source_type
+                ),
                 source_id=source.source_id,
                 content=source.content,
                 created_at=source.created_at,
             )
         )
 
+        canonical_sources_by_conflict[
+            source.conflict_id
+        ].append(
+            (
+                normalized_source_type,
+                source.source_id,
+                source.content,
+            )
+        )
+
+    # -----------------------------------------------------
+    # Mission Conflict Presentation Canonicalization
+    #
+    # rows는 이미 최신순이다.
+    # DB 삭제 없이 화면에 노출할 Conflict만 결정한다.
+    # -----------------------------------------------------
+    canonicalization_records = [
+        build_conflict_canonicalization_record(
+            conflict_id=str(
+                conflict.conflict_id
+            ),
+            interview_id=str(
+                analysis.interview_id
+            ),
+            conflict_type=(
+                conflict.conflict_type
+            ),
+            description=(
+                conflict.description
+            ),
+            sources=(
+                canonical_sources_by_conflict.get(
+                    conflict.conflict_id,
+                    [],
+                )
+            ),
+        )
+        for conflict, analysis in rows
+    ]
+
+    visible_conflict_ids = (
+        select_visible_conflict_ids(
+            canonicalization_records
+        )
+    )
+
     conflicts = []
 
     for conflict, analysis in rows:
+        if (
+            str(conflict.conflict_id)
+            not in visible_conflict_ids
+        ):
+            continue
+
         conflicts.append(
             MissionKnowledgeConflictResponse(
                 conflict_id=(
