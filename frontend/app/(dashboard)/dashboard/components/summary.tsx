@@ -1,6 +1,5 @@
 import {
   Target,
-  SearchCheck,
   FileText,
   CircleCheckBig,
   TriangleAlert,
@@ -21,6 +20,7 @@ export default function DashboardSummarySection({
   summary,
   summaryLoading,
 }: DashboardSummaryProps) {
+  // 전체 시스템 KPI
   const summaryCards = [
     {
       label: "진행 중인 미션",
@@ -30,16 +30,6 @@ export default function DashboardSummarySection({
       iconBg: "bg-blue-100",
       iconColor: "text-blue-600",
       barColor: "bg-blue-600",
-    },
-    {
-      label: "지식 후보",
-      // Mission 단위 Candidate 조회 API 확인 전
-      value: "-",
-      unit: "개",
-      icon: SearchCheck,
-      iconBg: "bg-indigo-100",
-      iconColor: "text-indigo-600",
-      barColor: "bg-indigo-600",
     },
     {
       label: "지식 단위",
@@ -88,7 +78,8 @@ export default function DashboardSummarySection({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {/* 4개 KPI 카드 균등 배치 */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {summaryCards.map((item) => {
           const Icon = item.icon;
 
