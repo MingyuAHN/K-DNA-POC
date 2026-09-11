@@ -12,7 +12,12 @@ from app.models.knowledge_core import KnowledgeUnit
 from app.models.knowledge_synthesis import KnowledgeSynthesis, KnowledgeSynthesisUnit
 from app.schemas.knowledge_synthesis import AutoKnowledgeSyncItem, AutoKnowledgeSyncResponse, KnowledgeSynthesisRequest
 from app.schemas.knowledge_synthesis_apply import KnowledgeSynthesisValidationRequest
-from app.services.knowledge_duplicate_service import find_duplicate_active_knowledge, reuse_existing_knowledge_for_duplicate
+from app.services.knowledge_duplicate_service import (
+    RULE_LIKE_KNOWLEDGE_TYPES,
+    assess_synthesized_unit_material_change,
+    find_duplicate_active_knowledge,
+    reuse_existing_knowledge_for_duplicate,
+)
 from app.services.knowledge_synthesis_apply_service import validate_and_apply_synthesis
 from app.services.knowledge_synthesis_service import ACTIVE_KNOWLEDGE_STATUSES, synthesize_candidate
 logger = logging.getLogger(__name__)
@@ -176,8 +181,77 @@ def _get_requested_existing_knowledge_ids(synthesis: KnowledgeSynthesis) -> list
             continue
     return result
 
-def _get_synthesis_unit_count(db: Session, synthesis: KnowledgeSynthesis) -> int:
-    return int(db.query(KnowledgeSynthesisUnit).filter(KnowledgeSynthesisUnit.synthesis_id == synthesis.synthesis_id).count())
+def _get_synthesis_unit_count(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+) -> int:
+    return int(
+        db.query(KnowledgeSynthesisUnit)
+        .filter(
+            KnowledgeSynthesisUnit.synthesis_id
+            == synthesis.synthesis_id
+        )
+        .count()
+    )
+
+
+def _get_synthesis_units(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+) -> list[KnowledgeSynthesisUnit]:
+    return (
+        db.query(KnowledgeSynthesisUnit)
+        .filter(
+            KnowledgeSynthesisUnit.synthesis_id
+            == synthesis.synthesis_id
+        )
+        .order_by(
+            KnowledgeSynthesisUnit.synthesized_index.asc()
+        )
+        .all()
+    )
+
+
+def _knowledge_root_id(
+    knowledge: KnowledgeUnit,
+) -> uuid.UUID:
+    return (
+        knowledge.root_knowledge_id
+        if knowledge.root_knowledge_id is not None
+        else knowledge.knowledge_id
+    )
+
+
+def _get_analysis_touched_root_ids(
+    db: Session,
+    candidate_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    """
+    같은 analysis의 이전 실행에서 이미 생성된 Knowledge까지 포함해
+    Root 단위 version inflation을 막는다.
+
+    한 Interview Turn에서 같은 Root를 여러 Candidate가 연속으로
+    자동 version-up 하는 대신, 첫 material update 이후의 추가
+    update는 Review Queue로 보낸다.
+    """
+    if not candidate_ids:
+        return set()
+
+    rows = (
+        db.query(KnowledgeUnit)
+        .filter(
+            KnowledgeUnit.source_candidate_id.in_(
+                candidate_ids
+            )
+        )
+        .all()
+    )
+
+    return {
+        _knowledge_root_id(row)
+        for row in rows
+    }
+
 
 def _mark_review_required(
     db: Session,
@@ -255,28 +329,121 @@ def _normalize_auto_operation(db: Session, synthesis: KnowledgeSynthesis) -> str
             return detail
     return None
 
-def _check_auto_apply_safety(db: Session, synthesis: KnowledgeSynthesis) -> tuple[bool, str | None]:
-    targets = _get_synthesis_targets(db=db, synthesis=synthesis)
-    existing_ids = _get_requested_existing_knowledge_ids(synthesis)
-    proposal_count = _get_synthesis_unit_count(db=db, synthesis=synthesis)
+def _check_auto_apply_safety(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+) -> tuple[bool, str | None]:
+    targets = _get_synthesis_targets(
+        db=db,
+        synthesis=synthesis,
+    )
+    existing_ids = _get_requested_existing_knowledge_ids(
+        synthesis
+    )
+    proposals = _get_synthesis_units(
+        db=db,
+        synthesis=synthesis,
+    )
+    proposal_count = len(proposals)
     operation = synthesis.operation
+
     if operation == 'KEEP_CONFLICT':
-        return (False, 'KEEP_CONFLICT requires manual review and cannot be automatically applied')
+        return (
+            False,
+            (
+                'KEEP_CONFLICT requires manual review '
+                'and cannot be automatically applied'
+            ),
+        )
+
     if operation == 'SPLIT_BY_CONTEXT':
-        return (False, 'SPLIT_BY_CONTEXT requires manual review and cannot be automatically applied')
+        return (
+            False,
+            (
+                'SPLIT_BY_CONTEXT requires manual review '
+                'and cannot be automatically applied'
+            ),
+        )
+
     if operation in {'ENRICH', 'SUPERSEDE'}:
         if len(targets) != 1 or proposal_count != 1:
-            return (False, f'{operation} requires exactly one target and one synthesized unit for automatic apply')
+            return (
+                False,
+                (
+                    f'{operation} requires exactly one target '
+                    'and one synthesized unit for automatic apply'
+                ),
+            )
+
+        target = targets[0]
+        proposal = proposals[0]
+
+        # EXCEPTION -> PRINCIPLE, FAILURE_LESSON -> DECISION_RULE처럼
+        # Knowledge family 자체가 바뀌는 version update는 Root가
+        # 다른 지식을 흡수하는 mega-knowledge가 될 수 있으므로
+        # 자동 적용하지 않는다.
+        if target.knowledge_type != proposal.knowledge_type:
+            target_rule_like = (
+                target.knowledge_type
+                in RULE_LIKE_KNOWLEDGE_TYPES
+            )
+            proposal_rule_like = (
+                proposal.knowledge_type
+                in RULE_LIKE_KNOWLEDGE_TYPES
+            )
+
+            if not (
+                target_rule_like
+                and proposal_rule_like
+            ):
+                return (
+                    False,
+                    (
+                        'Cross-family knowledge_type version update '
+                        'requires manual review: '
+                        f'{target.knowledge_type} -> '
+                        f'{proposal.knowledge_type}'
+                    ),
+                )
+
     if operation == 'ADD_EXCEPTION':
         if len(targets) != 1 or proposal_count != 1:
-            return (False, 'ADD_EXCEPTION requires exactly one target and one synthesized unit for automatic apply')
+            return (
+                False,
+                (
+                    'ADD_EXCEPTION requires exactly one target '
+                    'and one synthesized unit for automatic apply'
+                ),
+            )
+
     if operation == 'MERGE':
         if existing_ids:
-            return (False, 'Automatic MERGE is allowed only for brand-new knowledge with no existing knowledge')
+            return (
+                False,
+                (
+                    'Automatic MERGE is allowed only for '
+                    'brand-new knowledge with no existing knowledge'
+                ),
+            )
+
         if targets:
-            return (False, 'Automatic MERGE is allowed only when there is no target knowledge')
+            return (
+                False,
+                (
+                    'Automatic MERGE is allowed only when '
+                    'there is no target knowledge'
+                ),
+            )
+
         if proposal_count != 1:
-            return (False, 'Automatic MERGE requires exactly one synthesized unit')
+            return (
+                False,
+                (
+                    'Automatic MERGE requires exactly one '
+                    'synthesized unit'
+                ),
+            )
+
     return (True, None)
 
 # --- Synthesis creation / retry ---
@@ -307,7 +474,28 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
     analysis = db.query(InterviewAnalysis).filter(InterviewAnalysis.analysis_id == analysis_id).first()
     if analysis is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Interview analysis not found')
-    candidate_ids = [row.candidate_id for row in db.query(KnowledgeCandidate).filter(KnowledgeCandidate.analysis_id == analysis_id).order_by(KnowledgeCandidate.created_at.asc()).all()]
+    candidate_ids = [
+        row.candidate_id
+        for row in (
+            db.query(KnowledgeCandidate)
+            .filter(
+                KnowledgeCandidate.analysis_id
+                == analysis_id
+            )
+            .order_by(
+                KnowledgeCandidate.created_at.asc()
+            )
+            .all()
+        )
+    ]
+
+    analysis_touched_root_ids = (
+        _get_analysis_touched_root_ids(
+            db=db,
+            candidate_ids=candidate_ids,
+        )
+    )
+
     processed = 0
     skipped = 0
     review_required = 0
@@ -395,10 +583,171 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                 review_required += 1
                 items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=synthesis_id, resulting_knowledge_ids=[], detail=review_reason))
                 continue
-            apply_result = validate_and_apply_synthesis(db=db, synthesis_id=synthesis_id, request=KnowledgeSynthesisValidationRequest(decision='APPROVE', reason=AUTO_VALIDATION_REASON, validated_by=AUTO_VALIDATED_BY))
+            version_root_id: uuid.UUID | None = None
+            material_assessment = None
+
+            if synthesis.operation in {
+                'ENRICH',
+                'SUPERSEDE',
+            }:
+                version_targets = _get_synthesis_targets(
+                    db=db,
+                    synthesis=synthesis,
+                )
+                version_proposals = _get_synthesis_units(
+                    db=db,
+                    synthesis=synthesis,
+                )
+
+                if (
+                    len(version_targets) == 1
+                    and len(version_proposals) == 1
+                ):
+                    version_target = version_targets[0]
+                    version_proposal = version_proposals[0]
+                    version_root_id = _knowledge_root_id(
+                        version_target
+                    )
+
+                    material_assessment = (
+                        assess_synthesized_unit_material_change(
+                            target=version_target,
+                            proposal=version_proposal,
+                            embedding_cache=(
+                                duplicate_embedding_cache
+                            ),
+                        )
+                    )
+
+                    # Synthesis 결과가 기존 target의 단순 재서술이면
+                    # Apply Service의 no-op reuse path로 보내되,
+                    # Auto Sync 결과에서는 새 버전 생성이 아니므로
+                    # SKIPPED로 기록한다.
+                    if not material_assessment.material_change:
+                        apply_result = (
+                            validate_and_apply_synthesis(
+                                db=db,
+                                synthesis_id=synthesis_id,
+                                request=(
+                                    KnowledgeSynthesisValidationRequest(
+                                        decision='APPROVE',
+                                        reason=(
+                                            AUTO_VALIDATION_REASON
+                                        ),
+                                        validated_by=(
+                                            AUTO_VALIDATED_BY
+                                        ),
+                                    )
+                                ),
+                                material_change_embedding_cache=(
+                                    duplicate_embedding_cache
+                                ),
+                            )
+                        )
+
+                        skipped += 1
+                        detail_messages.insert(
+                            0,
+                            (
+                                'Synthesized proposal produced no '
+                                'material knowledge change; existing '
+                                'Knowledge Unit reused'
+                            ),
+                        )
+                        detail_messages.append(
+                            material_assessment.reason
+                        )
+
+                        items.append(
+                            AutoKnowledgeSyncItem(
+                                candidate_id=candidate_id,
+                                status='SKIPPED',
+                                synthesis_id=synthesis_id,
+                                resulting_knowledge_ids=(
+                                    apply_result
+                                    .resulting_knowledge_ids
+                                ),
+                                detail='. '.join(
+                                    detail_messages
+                                ),
+                            )
+                        )
+                        continue
+
+                    # 한 Turn에서 같은 Root를 연속으로 자동 갱신하면
+                    # Candidate 수만큼 version이 증가할 수 있다.
+                    # 첫 material update 이후 추가 update는 사람에게
+                    # 검토를 넘긴다.
+                    if (
+                        version_root_id
+                        in analysis_touched_root_ids
+                    ):
+                        review_reason = (
+                            'Same interview analysis already '
+                            'updated this knowledge root; '
+                            'additional material update requires '
+                            'manual review to prevent version '
+                            'inflation. '
+                            f'root_knowledge_id={version_root_id}'
+                        )
+
+                        _mark_review_required(
+                            db=db,
+                            candidate=candidate,
+                            reason=review_reason,
+                            synthesis_id=synthesis_id,
+                        )
+
+                        review_required += 1
+
+                        items.append(
+                            AutoKnowledgeSyncItem(
+                                candidate_id=candidate_id,
+                                status='REVIEW_REQUIRED',
+                                synthesis_id=synthesis_id,
+                                resulting_knowledge_ids=[],
+                                detail=review_reason,
+                            )
+                        )
+                        continue
+
+            apply_result = validate_and_apply_synthesis(
+                db=db,
+                synthesis_id=synthesis_id,
+                request=KnowledgeSynthesisValidationRequest(
+                    decision='APPROVE',
+                    reason=AUTO_VALIDATION_REASON,
+                    validated_by=AUTO_VALIDATED_BY,
+                ),
+                material_change_embedding_cache=(
+                    duplicate_embedding_cache
+                ),
+            )
+
+            if version_root_id is not None:
+                analysis_touched_root_ids.add(
+                    version_root_id
+                )
+
             processed += 1
-            detail_messages.insert(0, 'Candidate synthesized and applied successfully')
-            items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='APPLIED', synthesis_id=synthesis_id, resulting_knowledge_ids=apply_result.resulting_knowledge_ids, detail='. '.join(detail_messages)))
+            detail_messages.insert(
+                0,
+                (
+                    'Candidate synthesized and applied '
+                    'successfully'
+                ),
+            )
+            items.append(
+                AutoKnowledgeSyncItem(
+                    candidate_id=candidate_id,
+                    status='APPLIED',
+                    synthesis_id=synthesis_id,
+                    resulting_knowledge_ids=(
+                        apply_result.resulting_knowledge_ids
+                    ),
+                    detail='. '.join(detail_messages),
+                )
+            )
         except HTTPException as exc:
             db.rollback()
             failed += 1

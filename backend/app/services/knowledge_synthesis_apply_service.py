@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -29,6 +30,12 @@ from app.schemas.knowledge_synthesis_apply import (
     KnowledgeSynthesisValidationRequest,
     KnowledgeSynthesisValidationResponse,
 )
+from app.services.knowledge_duplicate_service import (
+    assess_synthesized_unit_material_change,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -200,6 +207,24 @@ def _create_evidence(
     if source_message is None:
         return
 
+    # 같은 Interview Message가 동일 Knowledge에 이미 Evidence로
+    # 누적되어 있으면 중복 row를 만들지 않는다.
+    existing = (
+        db.query(Evidence)
+        .filter(
+            Evidence.knowledge_id
+            == knowledge.knowledge_id,
+            Evidence.source_type
+            == "INTERVIEW_MESSAGE",
+            Evidence.source_id
+            == str(source_message.message_id),
+        )
+        .first()
+    )
+
+    if existing is not None:
+        return
+
     db.add(
         Evidence(
             knowledge_id=(
@@ -314,6 +339,9 @@ def validate_and_apply_synthesis(
     db: Session,
     synthesis_id: uuid.UUID,
     request: KnowledgeSynthesisValidationRequest,
+    material_change_embedding_cache: (
+        dict[str, list[float]] | None
+    ) = None,
 ) -> KnowledgeSynthesisValidationResponse:
 
     synthesis = (
@@ -580,6 +608,132 @@ def validate_and_apply_synthesis(
                 else target.knowledge_id
             )
 
+            # --------------------------------------------------
+            # Post-synthesis Material Change Guard
+            #
+            # Candidate-level duplicate suppression을 통과했더라도
+            # AI Synthesis 결과가 target Knowledge의 단순 재서술일
+            # 수 있다. 이 경우 새 version을 만들지 않고 기존
+            # Knowledge를 그대로 재사용하며 Evidence만 누적한다.
+            # --------------------------------------------------
+            material_assessment = (
+                assess_synthesized_unit_material_change(
+                    target=target,
+                    proposal=proposal,
+                    embedding_cache=(
+                        material_change_embedding_cache
+                    ),
+                )
+            )
+
+            if not material_assessment.material_change:
+                proposal.validation_status = "VERIFIED"
+                proposal.applied_knowledge_id = (
+                    target.knowledge_id
+                )
+
+                _create_evidence(
+                    db=db,
+                    knowledge=target,
+                    synthesis=synthesis,
+                    candidate=candidate,
+                    analysis=analysis,
+                )
+
+                candidate.validation_status = "VERIFIED"
+
+                if (
+                    candidate.review_status
+                    == "REVIEW_REQUIRED"
+                ):
+                    candidate.review_status = "RESOLVED"
+                    candidate.review_synthesis_id = (
+                        synthesis.synthesis_id
+                    )
+
+                    if request.reason:
+                        candidate.review_reason = (
+                            request.reason
+                        )
+
+                synthesis.status = "APPLIED"
+                synthesis.applied_at = now
+                synthesis.resulting_knowledge_ids = [
+                    str(target.knowledge_id)
+                ]
+
+                base_reason = (
+                    request.reason.strip()
+                    if request.reason
+                    and request.reason.strip()
+                    else "Synthesis approved"
+                )
+                synthesis.validation_reason = (
+                    f"{base_reason}; no material knowledge "
+                    f"change, existing target reused; "
+                    f"{material_assessment.reason}"
+                )
+
+                db.commit()
+                db.refresh(synthesis)
+                db.refresh(candidate)
+                db.refresh(proposal)
+
+                logger.info(
+                    (
+                        "Knowledge version inflation suppressed "
+                        "synthesis_id=%s candidate_id=%s "
+                        "target_knowledge_id=%s reason=%s"
+                    ),
+                    synthesis.synthesis_id,
+                    candidate.candidate_id,
+                    target.knowledge_id,
+                    material_assessment.reason,
+                )
+
+                return (
+                    KnowledgeSynthesisValidationResponse(
+                        synthesis_id=(
+                            synthesis.synthesis_id
+                        ),
+                        decision="APPROVE",
+                        status="APPLIED",
+                        operation=(
+                            synthesis.operation
+                        ),
+                        resulting_knowledge_ids=[
+                            target.knowledge_id
+                        ],
+                        knowledge_units=[
+                            AppliedKnowledgeUnit(
+                                synthesis_unit_id=(
+                                    proposal
+                                    .synthesis_unit_id
+                                ),
+                                knowledge_id=(
+                                    target.knowledge_id
+                                ),
+                                knowledge_type=(
+                                    target.knowledge_type
+                                ),
+                                statement=(
+                                    target.statement
+                                ),
+                                version=(
+                                    target.version
+                                ),
+                                status=(
+                                    target.status
+                                ),
+                            )
+                        ],
+                        reason=request.reason,
+                        validated_by=(
+                            request.validated_by
+                        ),
+                    )
+                )
+
             new_knowledge = (
                 _create_new_unit(
                     db=db,
@@ -771,6 +925,23 @@ def validate_and_apply_synthesis(
                     target_id
                 )
 
+            relation_type = (
+                proposal_relation.relation_type
+            )
+
+            # ENRICH로 생성된 새 Version이 바로 이전 Version을
+            # 단순 SUPPORTS한다고 저장되면 SUPERSEDES + SUPPORTS라는
+            # 애매한 version edge가 생긴다. Direct target에 대한
+            # SUPPORTS는 version semantics에 맞춰 REFINES로 정규화한다.
+            if (
+                synthesis.operation == "ENRICH"
+                and relation_type == "SUPPORTS"
+                and len(targets) == 1
+                and target_id
+                == targets[0].knowledge_id
+            ):
+                relation_type = "REFINES"
+
             _add_relation_if_missing(
                 db=db,
                 mission_id=(
@@ -780,10 +951,7 @@ def validate_and_apply_synthesis(
                 target_id=(
                     relation_target_id
                 ),
-                relation_type=(
-                    proposal_relation
-                    .relation_type
-                ),
+                relation_type=relation_type,
                 source_analysis_id=(
                     analysis.analysis_id
                     if analysis is not None

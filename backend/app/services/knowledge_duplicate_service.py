@@ -12,6 +12,7 @@ from app.clients.ai_client import AIClientError, ai_client
 from app.models.interview_analysis import InterviewAnalysis, KnowledgeCandidate
 from app.models.interview_message import InterviewMessage
 from app.models.knowledge_core import Evidence, KnowledgeUnit
+from app.models.knowledge_synthesis import KnowledgeSynthesisUnit
 from app.schemas.embedding import EmbeddingItemRequest, EmbeddingRequest
 logger = logging.getLogger(__name__)
 ACTIVE_KNOWLEDGE_STATUSES = {'VERIFIED', 'EXPERT_OPINION'}
@@ -51,6 +52,27 @@ INSUFFICIENCY_SUBCLAIM_MIN_TOKEN_CONTAINMENT = 0.35
 INSUFFICIENCY_SUBCLAIM_MIN_CHAR_CONTAINMENT = 0.35
 EXCEPTION_MARKERS = ('다만', '예외', '반대로', '경우에는', '때에는', 'unless')
 
+# Post-synthesis material-change guard.
+#
+# Candidate-level duplicate suppression runs before synthesis.  These
+# thresholds protect the second boundary: a synthesized proposal that is
+# only a wording rewrite of its target must not create another Knowledge
+# version.
+MATERIAL_NOOP_MAX_SYMMETRIC_LENGTH_RATIO = 1.2
+MATERIAL_NOOP_STRONG_SEQUENCE_THRESHOLD = 0.92
+MATERIAL_NOOP_STRONG_JACCARD_THRESHOLD = 0.72
+MATERIAL_NOOP_STRONG_BIDIRECTIONAL_TOKEN_CONTAINMENT = 0.8
+MATERIAL_NOOP_STRONG_BIDIRECTIONAL_CHAR_CONTAINMENT = 0.82
+MATERIAL_NOOP_SEMANTIC_SIMILARITY = 0.94
+MATERIAL_NOOP_SEMANTIC_MIN_SEQUENCE = 0.8
+MATERIAL_NOOP_SEMANTIC_MIN_BIDIRECTIONAL_TOKEN_CONTAINMENT = 0.72
+MATERIAL_NOOP_SEMANTIC_MIN_BIDIRECTIONAL_CHAR_CONTAINMENT = 0.72
+MATERIAL_NEW_TOKEN_MIN_COUNT = 5
+MATERIAL_NEW_TOKEN_MIN_RATIO = 0.15
+MATERIAL_STRUCTURE_SEQUENCE_THRESHOLD = 0.9
+MATERIAL_STRUCTURE_JACCARD_THRESHOLD = 0.75
+MATERIAL_CONTEXT_KEYS = ('project', 'domain', 'system', 'scope', 'phase', 'time')
+
 # --- Result / metric models ---
 @dataclass(frozen=True)
 class DuplicateKnowledgeMatch:
@@ -63,6 +85,20 @@ class DuplicateKnowledgeMatch:
     semantic_similarity: float | None
     combined_score: float
     tag_overlap_count: int
+
+@dataclass(frozen=True)
+class MaterialChangeAssessment:
+    material_change: bool
+    reason: str
+    sequence_ratio: float
+    token_jaccard: float
+    bidirectional_token_containment: float
+    bidirectional_char_containment: float
+    semantic_similarity: float | None
+    symmetric_length_ratio: float
+    new_token_count: int
+    new_token_ratio: float
+
 
 @dataclass(frozen=True)
 class _SimilarityMetrics:
@@ -293,55 +329,108 @@ def _expresses_sufficient_condition(value: str | None) -> bool:
 
     return any(verb in compact for verb in INSUFFICIENCY_DECISION_VERBS)
 
-def _has_polarity_mismatch(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) -> bool:
+def _statements_have_polarity_mismatch(
+    left_statement: str | None,
+    right_statement: str | None,
+) -> bool:
     """
-    Embedding은 긍정/부정 문장을 가깝게 볼 수 있으므로
-    실제로 결론 방향이 반대인 경우에는 Duplicate로 합치지 않는다.
-
-    다만 "A만으로 결정하지 않는다"와 "A만으로는 부족하다"처럼
-    같은 불충분성을 서로 다른 표현으로 설명한 경우는
-    polarity mismatch로 보지 않는다.
+    Generic polarity guard used by both Candidate duplicate detection and
+    post-synthesis material-change detection.
     """
-    candidate_insufficient = _expresses_insufficient_condition(candidate.statement)
-    knowledge_insufficient = _expresses_insufficient_condition(knowledge.statement)
-    candidate_sufficient = _expresses_sufficient_condition(candidate.statement)
-    knowledge_sufficient = _expresses_sufficient_condition(knowledge.statement)
+    left_insufficient = _expresses_insufficient_condition(left_statement)
+    right_insufficient = _expresses_insufficient_condition(right_statement)
+    left_sufficient = _expresses_sufficient_condition(left_statement)
+    right_sufficient = _expresses_sufficient_condition(right_statement)
 
-    if (candidate_insufficient and knowledge_sufficient) or (knowledge_insufficient and candidate_sufficient):
+    if (
+        (left_insufficient and right_sufficient)
+        or (right_insufficient and left_sufficient)
+    ):
         return True
 
-    candidate_hard_negative = _contains_any_marker(candidate.statement, HARD_NEGATION_MARKERS)
-    knowledge_hard_negative = _contains_any_marker(knowledge.statement, HARD_NEGATION_MARKERS)
+    left_hard_negative = _contains_any_marker(
+        left_statement,
+        HARD_NEGATION_MARKERS,
+    )
+    right_hard_negative = _contains_any_marker(
+        right_statement,
+        HARD_NEGATION_MARKERS,
+    )
 
-    if candidate_hard_negative != knowledge_hard_negative:
-        if candidate_hard_negative or knowledge_hard_negative:
+    if left_hard_negative != right_hard_negative:
+        if left_hard_negative or right_hard_negative:
             return True
 
     # "A만으로는 부족하다" 같은 insufficiency는 문장의 전체 결론을
-    # 부정하는 것이 아니라 조건의 불충분성을 설명하는 qualifier다.
-    # 한쪽에만 insufficiency가 있고 상대가 그 조건을 명시적으로
-    # 충분하다고 주장하지 않는다면 semantic duplicate 비교를 허용한다.
-    if candidate_insufficient or knowledge_insufficient:
+    # 반대로 뒤집는 부정이 아니다.
+    if left_insufficient or right_insufficient:
         return False
 
-    candidate_negative = _contains_any_marker(candidate.statement, NEGATION_MARKERS)
-    knowledge_negative = _contains_any_marker(knowledge.statement, NEGATION_MARKERS)
+    left_negative = _contains_any_marker(
+        left_statement,
+        NEGATION_MARKERS,
+    )
+    right_negative = _contains_any_marker(
+        right_statement,
+        NEGATION_MARKERS,
+    )
 
-    if candidate_negative == knowledge_negative:
+    if left_negative == right_negative:
         return False
 
-    sequence_ratio = _sequence_ratio(candidate.statement, knowledge.statement)
-    candidate_to_knowledge_token = _token_containment(candidate.statement, knowledge.statement)
-    knowledge_to_candidate_token = _token_containment(knowledge.statement, candidate.statement)
-    bidirectional_token_containment = min(candidate_to_knowledge_token, knowledge_to_candidate_token)
-    candidate_to_knowledge_char = _char_containment(candidate.statement, knowledge.statement)
-    knowledge_to_candidate_char = _char_containment(knowledge.statement, candidate.statement)
-    bidirectional_char_containment = min(candidate_to_knowledge_char, knowledge_to_candidate_char)
+    sequence_ratio = _sequence_ratio(
+        left_statement,
+        right_statement,
+    )
+    left_to_right_token = _token_containment(
+        left_statement,
+        right_statement,
+    )
+    right_to_left_token = _token_containment(
+        right_statement,
+        left_statement,
+    )
+    bidirectional_token_containment = min(
+        left_to_right_token,
+        right_to_left_token,
+    )
+    left_to_right_char = _char_containment(
+        left_statement,
+        right_statement,
+    )
+    right_to_left_char = _char_containment(
+        right_statement,
+        left_statement,
+    )
+    bidirectional_char_containment = min(
+        left_to_right_char,
+        right_to_left_char,
+    )
 
     return (
         sequence_ratio >= POLARITY_MIN_SEQUENCE_RATIO
-        or bidirectional_token_containment >= POLARITY_MIN_BIDIRECTIONAL_TOKEN_CONTAINMENT
-        or bidirectional_char_containment >= POLARITY_MIN_BIDIRECTIONAL_CHAR_CONTAINMENT
+        or (
+            bidirectional_token_containment
+            >= POLARITY_MIN_BIDIRECTIONAL_TOKEN_CONTAINMENT
+        )
+        or (
+            bidirectional_char_containment
+            >= POLARITY_MIN_BIDIRECTIONAL_CHAR_CONTAINMENT
+        )
+    )
+
+
+def _has_polarity_mismatch(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+) -> bool:
+    """
+    Embedding은 긍정/부정 문장을 가깝게 볼 수 있으므로
+    실제로 결론 방향이 반대인 경우에는 Duplicate로 합치지 않는다.
+    """
+    return _statements_have_polarity_mismatch(
+        candidate.statement,
+        knowledge.statement,
     )
 
 def _candidate_adds_exception_signal(candidate: KnowledgeCandidate, knowledge: KnowledgeUnit) -> bool:
@@ -522,6 +611,513 @@ def _is_semantic_duplicate(metrics: _SimilarityMetrics, semantic_similarity: flo
     high_semantic_override = semantic_similarity >= CROSS_TYPE_HIGH_SEMANTIC_OVERRIDE and has_tag_support
     normal_semantic_match = semantic_similarity >= CROSS_TYPE_MIN_SEMANTIC_SIMILARITY and combined_score >= CROSS_TYPE_MIN_COMBINED_SCORE and has_tag_support and has_structural_support
     return (normal_semantic_match or high_semantic_override, combined_score)
+
+
+# --- Post-synthesis material-change guard ---
+def _symmetric_length_ratio(
+    left: str | None,
+    right: str | None,
+) -> float:
+    left_text = _compact_text(left)
+    right_text = _compact_text(right)
+
+    if not left_text or not right_text:
+        return 999.0
+
+    longer = max(len(left_text), len(right_text))
+    shorter = min(len(left_text), len(right_text))
+
+    if shorter <= 0:
+        return 999.0
+
+    return longer / shorter
+
+
+def _flatten_structure(value) -> str:
+    """
+    decision_rule처럼 dict/list가 섞인 구조를 비교 가능한 문자열로
+    정규화한다. List 순서는 Knowledge 의미보다 생성 순서 차이일 수
+    있으므로 각 항목을 정규화한 뒤 정렬한다.
+    """
+    if value is None:
+        return ''
+
+    if isinstance(value, dict):
+        parts: list[str] = []
+
+        for key in sorted(value.keys()):
+            parts.append(
+                f'{_normalize_text(str(key))}:'
+                f'{_flatten_structure(value[key])}'
+            )
+
+        return ' '.join(parts)
+
+    if isinstance(value, list):
+        parts = [
+            _flatten_structure(item)
+            for item in value
+        ]
+        parts = [
+            part
+            for part in parts
+            if part
+        ]
+        return ' '.join(sorted(parts))
+
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+
+    return _normalize_text(str(value))
+
+
+def _structures_are_materially_different(
+    left,
+    right,
+) -> bool:
+    left_text = _flatten_structure(left)
+    right_text = _flatten_structure(right)
+
+    if not left_text and not right_text:
+        return False
+
+    if bool(left_text) != bool(right_text):
+        return True
+
+    if left_text == right_text:
+        return False
+
+    sequence_ratio = _sequence_ratio(
+        left_text,
+        right_text,
+    )
+    token_jaccard = _token_jaccard(
+        left_text,
+        right_text,
+    )
+
+    return not (
+        sequence_ratio
+        >= MATERIAL_STRUCTURE_SEQUENCE_THRESHOLD
+        and token_jaccard
+        >= MATERIAL_STRUCTURE_JACCARD_THRESHOLD
+    )
+
+
+def _texts_are_materially_different(
+    left: str | None,
+    right: str | None,
+) -> bool:
+    left_text = _normalize_text(left)
+    right_text = _normalize_text(right)
+
+    if not left_text and not right_text:
+        return False
+
+    if bool(left_text) != bool(right_text):
+        return True
+
+    if left_text == right_text:
+        return False
+
+    return not (
+        _sequence_ratio(left_text, right_text)
+        >= MATERIAL_STRUCTURE_SEQUENCE_THRESHOLD
+        and _token_jaccard(left_text, right_text)
+        >= MATERIAL_STRUCTURE_JACCARD_THRESHOLD
+    )
+
+
+def _material_context_conflict(
+    target_context: dict | None,
+    proposal_context: dict | None,
+) -> tuple[bool, str | None]:
+    """
+    Context 값이 둘 다 존재하면서 명백하게 달라지는 경우에만
+    Material Change로 본다.
+
+    한쪽 값이 비어 있는 경우는 AI가 metadata를 보완한 것일 수 있어
+    statement/decision_rule의 의미 변화 판정에 맡긴다.
+    """
+    target_context = target_context or {}
+    proposal_context = proposal_context or {}
+
+    for key in MATERIAL_CONTEXT_KEYS:
+        target_value = _normalize_context_value(
+            target_context.get(key)
+        )
+        proposal_value = _normalize_context_value(
+            proposal_context.get(key)
+        )
+
+        if target_value is None or proposal_value is None:
+            continue
+
+        if key == 'project':
+            if target_value != proposal_value:
+                return (
+                    True,
+                    f'context.{key} changed',
+                )
+            continue
+
+        if not _fuzzy_context_values_match(
+            target_value,
+            proposal_value,
+        ):
+            return (
+                True,
+                f'context.{key} changed',
+            )
+
+    return (False, None)
+
+
+def _constraint_tokens(
+    context: dict | None,
+) -> set[str]:
+    if not context:
+        return set()
+
+    values = context.get('constraints', [])
+
+    if not isinstance(values, list):
+        return set()
+
+    result: set[str] = set()
+
+    for value in values:
+        if isinstance(value, str):
+            result.update(_token_set(value))
+
+    return result
+
+
+def _constraints_add_material_detail(
+    target_context: dict | None,
+    proposal_context: dict | None,
+) -> tuple[bool, int, float]:
+    """
+    Statement가 거의 같더라도 proposal constraints에 실질적인
+    운영 조건이 대량 추가된 경우에는 새 Version 후보로 유지한다.
+
+    작은 표현 보강(예: "사전에" -> "DB 분리 전에 사전")은
+    version inflation 방지를 위해 Material로 보지 않는다.
+    """
+    target_tokens = _constraint_tokens(
+        target_context
+    )
+    proposal_tokens = _constraint_tokens(
+        proposal_context
+    )
+
+    if not proposal_tokens:
+        return (False, 0, 0.0)
+
+    new_tokens = proposal_tokens - target_tokens
+    new_count = len(new_tokens)
+    new_ratio = (
+        new_count / len(proposal_tokens)
+        if proposal_tokens
+        else 0.0
+    )
+
+    return (
+        (
+            new_count >= 6
+            and new_ratio >= 0.2
+        ),
+        new_count,
+        new_ratio,
+    )
+
+
+def assess_synthesized_unit_material_change(
+    target: KnowledgeUnit,
+    proposal: KnowledgeSynthesisUnit,
+    embedding_cache: dict[str, list[float]] | None = None,
+) -> MaterialChangeAssessment:
+    """
+    Synthesis 결과가 target Knowledge의 실제 의미를 바꾸거나
+    구체적인 새 조건/규칙을 추가하는지 판정한다.
+
+    False(material_change=False)는 단순 wording/paraphrase 수준으로
+    판단된 경우이며, 이때 새 Knowledge version을 만들지 않고
+    기존 target을 재사용해야 한다.
+
+    이 Guard는 일부러 보수적으로 동작한다.
+    - type 변화
+    - polarity 변화
+    - 명백한 Context 변화
+    - decision_rule 변화
+    - exception 변화
+    - 충분한 신규 statement token 추가
+    중 하나라도 있으면 Material Change로 유지한다.
+    """
+    sequence_ratio = _sequence_ratio(
+        proposal.statement,
+        target.statement,
+    )
+    token_jaccard = _token_jaccard(
+        proposal.statement,
+        target.statement,
+    )
+
+    proposal_to_target_token = _token_containment(
+        proposal.statement,
+        target.statement,
+    )
+    target_to_proposal_token = _token_containment(
+        target.statement,
+        proposal.statement,
+    )
+    bidirectional_token_containment = min(
+        proposal_to_target_token,
+        target_to_proposal_token,
+    )
+
+    proposal_to_target_char = _char_containment(
+        proposal.statement,
+        target.statement,
+    )
+    target_to_proposal_char = _char_containment(
+        target.statement,
+        proposal.statement,
+    )
+    bidirectional_char_containment = min(
+        proposal_to_target_char,
+        target_to_proposal_char,
+    )
+
+    symmetric_length_ratio = _symmetric_length_ratio(
+        proposal.statement,
+        target.statement,
+    )
+
+    target_tokens = _token_set(target.statement)
+    proposal_tokens = _token_set(proposal.statement)
+    new_tokens = proposal_tokens - target_tokens
+    new_token_count = len(new_tokens)
+    new_token_ratio = (
+        new_token_count / len(proposal_tokens)
+        if proposal_tokens
+        else 0.0
+    )
+
+    base = {
+        'sequence_ratio': sequence_ratio,
+        'token_jaccard': token_jaccard,
+        'bidirectional_token_containment': (
+            bidirectional_token_containment
+        ),
+        'bidirectional_char_containment': (
+            bidirectional_char_containment
+        ),
+        'symmetric_length_ratio': symmetric_length_ratio,
+        'new_token_count': new_token_count,
+        'new_token_ratio': new_token_ratio,
+    }
+
+    if proposal.knowledge_type != target.knowledge_type:
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason=(
+                'knowledge_type changed '
+                f'{target.knowledge_type} -> '
+                f'{proposal.knowledge_type}'
+            ),
+            semantic_similarity=None,
+            **base,
+        )
+
+    if _statements_have_polarity_mismatch(
+        proposal.statement,
+        target.statement,
+    ):
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason='statement polarity changed',
+            semantic_similarity=None,
+            **base,
+        )
+
+    context_conflict, context_reason = (
+        _material_context_conflict(
+            target.context,
+            proposal.context,
+        )
+    )
+
+    if context_conflict:
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason=(
+                context_reason
+                or 'material context changed'
+            ),
+            semantic_similarity=None,
+            **base,
+        )
+
+    (
+        constraints_material,
+        new_constraint_token_count,
+        new_constraint_token_ratio,
+    ) = _constraints_add_material_detail(
+        target.context,
+        proposal.context,
+    )
+
+    if constraints_material:
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason=(
+                'proposal adds substantive structured '
+                'constraints '
+                f'count={new_constraint_token_count} '
+                f'ratio={new_constraint_token_ratio:.4f}'
+            ),
+            semantic_similarity=None,
+            **base,
+        )
+
+    if _structures_are_materially_different(
+        target.decision_rule,
+        proposal.decision_rule,
+    ):
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason='decision_rule materially changed',
+            semantic_similarity=None,
+            **base,
+        )
+
+    if _texts_are_materially_different(
+        target.exception,
+        proposal.exception,
+    ):
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason='exception materially changed',
+            semantic_similarity=None,
+            **base,
+        )
+
+    if (
+        new_token_count >= MATERIAL_NEW_TOKEN_MIN_COUNT
+        and new_token_ratio >= MATERIAL_NEW_TOKEN_MIN_RATIO
+    ):
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason=(
+                'proposal adds substantive statement tokens '
+                f'count={new_token_count} '
+                f'ratio={new_token_ratio:.4f}'
+            ),
+            semantic_similarity=None,
+            **base,
+        )
+
+    if (
+        symmetric_length_ratio
+        > MATERIAL_NOOP_MAX_SYMMETRIC_LENGTH_RATIO
+    ):
+        return MaterialChangeAssessment(
+            material_change=True,
+            reason=(
+                'statement length changed materially '
+                f'ratio={symmetric_length_ratio:.4f}'
+            ),
+            semantic_similarity=None,
+            **base,
+        )
+
+    exact_same = (
+        _normalize_text(proposal.statement)
+        == _normalize_text(target.statement)
+    )
+
+    strong_lexical_rephrase = (
+        sequence_ratio
+        >= MATERIAL_NOOP_STRONG_SEQUENCE_THRESHOLD
+        or (
+            token_jaccard
+            >= MATERIAL_NOOP_STRONG_JACCARD_THRESHOLD
+            and bidirectional_token_containment
+            >= MATERIAL_NOOP_STRONG_BIDIRECTIONAL_TOKEN_CONTAINMENT
+            and bidirectional_char_containment
+            >= MATERIAL_NOOP_STRONG_BIDIRECTIONAL_CHAR_CONTAINMENT
+        )
+    )
+
+    if exact_same or strong_lexical_rephrase:
+        return MaterialChangeAssessment(
+            material_change=False,
+            reason=(
+                'synthesized proposal is a lexical no-op '
+                f'sequence={sequence_ratio:.4f} '
+                f'jaccard={token_jaccard:.4f} '
+                f'bidir_token={bidirectional_token_containment:.4f} '
+                f'bidir_char={bidirectional_char_containment:.4f}'
+            ),
+            semantic_similarity=None,
+            **base,
+        )
+
+    cache = (
+        embedding_cache
+        if embedding_cache is not None
+        else {}
+    )
+
+    _get_embedding_vectors(
+        texts=[
+            target.statement,
+            proposal.statement,
+        ],
+        embedding_cache=cache,
+    )
+
+    semantic_similarity = _semantic_similarity(
+        candidate_statement=proposal.statement,
+        knowledge_statement=target.statement,
+        embedding_cache=cache,
+    )
+
+    if (
+        semantic_similarity is not None
+        and semantic_similarity
+        >= MATERIAL_NOOP_SEMANTIC_SIMILARITY
+        and sequence_ratio
+        >= MATERIAL_NOOP_SEMANTIC_MIN_SEQUENCE
+        and bidirectional_token_containment
+        >= MATERIAL_NOOP_SEMANTIC_MIN_BIDIRECTIONAL_TOKEN_CONTAINMENT
+        and bidirectional_char_containment
+        >= MATERIAL_NOOP_SEMANTIC_MIN_BIDIRECTIONAL_CHAR_CONTAINMENT
+    ):
+        return MaterialChangeAssessment(
+            material_change=False,
+            reason=(
+                'synthesized proposal is a semantic no-op '
+                f'semantic={semantic_similarity:.4f} '
+                f'sequence={sequence_ratio:.4f} '
+                f'bidir_token={bidirectional_token_containment:.4f} '
+                f'bidir_char={bidirectional_char_containment:.4f}'
+            ),
+            semantic_similarity=semantic_similarity,
+            **base,
+        )
+
+    return MaterialChangeAssessment(
+        material_change=True,
+        reason=(
+            'proposal contains enough semantic or structural '
+            'change to justify a new version'
+        ),
+        semantic_similarity=semantic_similarity,
+        **base,
+    )
+
 
 # --- Public duplicate detection entry point ---
 def find_duplicate_active_knowledge(db: Session, mission_id: uuid.UUID, candidate: KnowledgeCandidate, embedding_cache: dict[str, list[float]] | None=None) -> DuplicateKnowledgeMatch | None:
