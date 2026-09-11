@@ -35,6 +35,47 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _candidate_snapshot_mismatch_fields(
+    synthesis: KnowledgeSynthesis,
+    candidate: KnowledgeCandidate,
+) -> list[str]:
+    """
+    Compare the immutable candidate snapshot stored in
+    synthesis.request_payload with the current candidate.
+
+    A synthesis created before a Review Edit must never be
+    applied after the candidate has changed.  This guard is
+    intentionally independent from synthesis.status so that
+    even a stale synthesis whose status is accidentally reset
+    cannot be applied.
+    """
+
+    request_payload = synthesis.request_payload or {}
+    snapshot = request_payload.get("candidate")
+
+    if not isinstance(snapshot, dict):
+        # Legacy synthesis rows may not have a candidate snapshot.
+        # Keep backward compatibility for those rows.
+        return []
+
+    current = {
+        "statement": candidate.statement,
+        "type": candidate.knowledge_type,
+        "context": candidate.context or {},
+        "decision_rule": candidate.decision_rule,
+        "rationale": candidate.rationale,
+        "exception": candidate.exception,
+    }
+
+    mismatches: list[str] = []
+
+    for key, current_value in current.items():
+        if snapshot.get(key) != current_value:
+            mismatches.append(key)
+
+    return mismatches
+
+
 def _get_targets(
     db: Session,
     synthesis: KnowledgeSynthesis,
@@ -308,6 +349,16 @@ def validate_and_apply_synthesis(
             ),
         )
 
+    if synthesis.status == "STALE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Knowledge synthesis is stale because "
+                "the candidate was edited; create a "
+                "new synthesis before validation"
+            ),
+        )
+
     candidate = (
         db.query(KnowledgeCandidate)
         .filter(
@@ -333,6 +384,49 @@ def validate_and_apply_synthesis(
     )
 
     now = _utcnow()
+
+    # ------------------------------------------------------
+    # Review Edit stale-synthesis guard
+    #
+    # Synthesis 생성 시 request_payload에 저장된 Candidate
+    # snapshot과 현재 Candidate가 다르면, 수정 전 Synthesis다.
+    # status 값과 무관하게 APPROVE를 차단하여 stale synthesis가
+    # 실수로 적용되는 것을 이중으로 방지한다.
+    # ------------------------------------------------------
+    if request.decision == "APPROVE":
+        mismatch_fields = _candidate_snapshot_mismatch_fields(
+            synthesis=synthesis,
+            candidate=candidate,
+        )
+
+        if mismatch_fields:
+            synthesis.status = "STALE"
+            synthesis.validated_by = (
+                request.validated_by
+                or "K-DNA REVIEW EDIT GUARD"
+            )
+            synthesis.validation_reason = (
+                "Candidate changed after synthesis creation; "
+                "re-synthesis is required. mismatched_fields="
+                + ",".join(mismatch_fields)
+            )
+            synthesis.validated_at = now
+
+            if candidate.review_status == "REVIEW_REQUIRED":
+                candidate.review_synthesis_id = None
+
+            db.commit()
+            db.refresh(synthesis)
+            db.refresh(candidate)
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Knowledge synthesis is stale because the "
+                    "candidate changed after synthesis creation; "
+                    "create a new synthesis before validation"
+                ),
+            )
 
     # ------------------------------------------------------
     # REJECT
@@ -491,6 +585,9 @@ def validate_and_apply_synthesis(
                     db=db,
                     synthesis=synthesis,
                     proposal=proposal,
+                    source_candidate_id=(
+                        candidate.candidate_id
+                    ),
                     version=(
                         target.version + 1
                     ),
@@ -539,6 +636,9 @@ def validate_and_apply_synthesis(
                     db=db,
                     synthesis=synthesis,
                     proposal=proposal,
+                    source_candidate_id=(
+                        candidate.candidate_id
+                    ),
                 )
 
                 applied_map[
@@ -595,6 +695,9 @@ def validate_and_apply_synthesis(
                     db=db,
                     synthesis=synthesis,
                     proposal=proposal,
+                    source_candidate_id=(
+                        candidate.candidate_id
+                    ),
                 )
 
                 applied_map[

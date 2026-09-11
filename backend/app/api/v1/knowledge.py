@@ -16,16 +16,19 @@ from app.schemas.knowledge import (
     ValidationResponse,
 )
 from app.schemas.knowledge_review import (
+    KnowledgeCandidateEditRequest,
+    KnowledgeCandidateEditResponse,
     KnowledgeReviewCandidateListResponse,
+)
+from app.services.knowledge_review_service import (
+    edit_review_candidate,
+    get_mission_review_candidates,
 )
 from app.services.knowledge_service import (
     get_knowledge_evidence,
     get_knowledge_unit,
     get_mission_knowledge_units,
     validate_knowledge_candidate,
-)
-from app.services.knowledge_review_service import (
-    get_mission_review_candidates,
 )
 
 
@@ -60,6 +63,22 @@ def validate_candidate_api(
         reason=validation.reason,
         validated_by=validation.validated_by,
         knowledge_unit=knowledge_unit,
+    )
+
+
+@router.patch(
+    "/knowledge-candidates/{candidate_id}",
+    response_model=KnowledgeCandidateEditResponse,
+)
+def edit_knowledge_candidate_api(
+    candidate_id: uuid.UUID,
+    request: KnowledgeCandidateEditRequest,
+    db: Session = Depends(get_db),
+):
+    return edit_review_candidate(
+        db=db,
+        candidate_id=candidate_id,
+        request=request,
     )
 
 
@@ -121,9 +140,7 @@ def get_knowledge_unit_api(
         source_candidate_id=(
             knowledge.source_candidate_id
         ),
-        knowledge_type=(
-            knowledge.knowledge_type
-        ),
+        knowledge_type=knowledge.knowledge_type,
         statement=knowledge.statement,
         context=knowledge.context,
         decision_rule=knowledge.decision_rule,
@@ -140,9 +157,7 @@ def get_knowledge_unit_api(
         root_knowledge_id=(
             knowledge.root_knowledge_id
         ),
-        supersedes_id=(
-            knowledge.supersedes_id
-        ),
+        supersedes_id=knowledge.supersedes_id,
         change_reason=knowledge.change_reason,
         created_at=knowledge.created_at,
         updated_at=knowledge.updated_at,

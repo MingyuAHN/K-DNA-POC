@@ -15,9 +15,15 @@ class KnowledgeSynthesisValidationRequest(
 ):
     decision: SynthesisDecision
 
-    reason: str | None = None
+    reason: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
 
-    validated_by: str | None = None
+    validated_by: str = Field(
+        min_length=1,
+        max_length=200,
+    )
 
 
 class AppliedKnowledgeUnit(BaseModel):
