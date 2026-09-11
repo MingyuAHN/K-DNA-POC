@@ -128,20 +128,67 @@ def select_conflicts(
         reverse=True,
     )
 
+    def source_signature(
+        conflict: ConflictResult,
+    ) -> tuple:
+
+        sources = []
+
+        for source in conflict.sources:
+            source_type = getattr(
+                source.source_type,
+                "value",
+                source.source_type,
+            )
+
+            sources.append(
+                (
+                    str(source_type),
+                    str(source.source_id),
+                )
+            )
+
+        return tuple(sorted(sources))
+
     for conflict in ranked:
         duplicate = False
 
+        current_sources = source_signature(
+            conflict
+        )
+
         for existing in unique:
-            if (
+            same_type = (
                 existing.conflict_type
                 == conflict.conflict_type
-                and _similar(
-                    existing.description,
-                    conflict.description,
-                    threshold=0.78,
-                )
+            )
+
+            same_sources = (
+                bool(current_sources)
+                and current_sources
+                == source_signature(existing)
+            )
+
+            similar_description = _similar(
+                existing.description,
+                conflict.description,
+                threshold=0.78,
+            )
+
+            if same_type and (
+                same_sources
+                or similar_description
             ):
                 duplicate = True
+
+                print(
+                    "[CONFLICT-GLOBAL-DEDUP] "
+                    "skip duplicate conflict: "
+                    f"type={conflict.conflict_type}, "
+                    f"sources={current_sources}",
+                    flush=True,
+                )
+
                 break
 
         if not duplicate:

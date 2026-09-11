@@ -24,17 +24,23 @@ class GapAnalyzer:
         mission = request.mission
 
         retrieved_knowledge = [
-            knowledge.model_dump()
+            knowledge.model_dump(mode="json")
             for knowledge in request.retrieved_knowledge
         ]
 
+        retrieved_knowledge_units = [
+            knowledge_unit.model_dump(mode="json")
+            for knowledge_unit
+            in request.retrieved_knowledge_units
+        ]
+
         retrieved_evidence = [
-            evidence.model_dump()
+            evidence.model_dump(mode="json")
             for evidence in request.retrieved_evidence
         ]
 
         conversation_context = [
-            message.model_dump()
+            message.model_dump(mode="json")
             for message in request.conversation_context
         ]
 
@@ -66,9 +72,14 @@ focus_topics:
 {conversation_context}
 
 
-[Retrieved Knowledge]
+[Retrieved Baseline Knowledge]
 
 {retrieved_knowledge}
+
+
+[Retrieved Existing Knowledge Units]
+
+{retrieved_knowledge_units}
 
 
 [Retrieved Evidence]

@@ -54,7 +54,7 @@ class StubLLMGateway:
                 "relations": [
                     {
                         "target_type": "EVIDENCE",
-                        "target_id": "chunk-adr021-001",
+                        "target_id": "22222222-2222-4222-8222-222222222222",
                         "relation": "CONTEXT_DIFFERS",
                         "reason": (
                             "Candidate는 일반적인 DB 분리 원칙이고 "
@@ -107,7 +107,7 @@ class StubLLMGateway:
                         "sources": [
                             {
                                 "source_type": "EVIDENCE",
-                                "source_id": "chunk-adr021-001",
+                                "source_id": "22222222-2222-4222-8222-222222222222",
                                 "content": (
                                     "Migration Phase 1에서는 "
                                     "Shared Physical Database를 사용한다."

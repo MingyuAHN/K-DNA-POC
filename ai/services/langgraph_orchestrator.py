@@ -217,6 +217,9 @@ class LangGraphAIOrchestrator:
                     retrieved_knowledge=(
                         request.retrieved_knowledge
                     ),
+                    retrieved_knowledge_units=(
+                        request.retrieved_knowledge_units
+                    ),
                     retrieved_evidence=(
                         request.retrieved_evidence
                     ),
@@ -282,6 +285,9 @@ class LangGraphAIOrchestrator:
                 ),
                 retrieved_knowledge=(
                     request.retrieved_knowledge
+                ),
+                retrieved_knowledge_units=(
+                    request.retrieved_knowledge_units
                 ),
                 retrieved_evidence=(
                     request.retrieved_evidence
@@ -359,6 +365,9 @@ class LangGraphAIOrchestrator:
                     semantic_relations=relations,
                     retrieved_knowledge=(
                         request.retrieved_knowledge
+                    ),
+                    retrieved_knowledge_units=(
+                        request.retrieved_knowledge_units
                     ),
                     retrieved_evidence=(
                         request.retrieved_evidence

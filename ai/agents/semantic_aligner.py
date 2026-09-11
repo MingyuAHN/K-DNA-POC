@@ -27,6 +27,11 @@ class SemanticAligner:
             for knowledge in request.retrieved_knowledge
         ]
 
+        knowledge_units_data = [
+            knowledge_unit.model_dump(mode="json")
+            for knowledge_unit in request.retrieved_knowledge_units
+        ]
+
         evidence_data = [
             evidence.model_dump(mode="json")
             for evidence in request.retrieved_evidence
@@ -40,9 +45,13 @@ Semantic Relation을 판정하세요.
 
 {candidate.model_dump_json(indent=2)}
 
-[Retrieved Knowledge]
+[Retrieved Baseline Knowledge]
 
 {knowledge_data}
+
+[Retrieved Existing Knowledge Units]
+
+{knowledge_units_data}
 
 [Retrieved Evidence]
 

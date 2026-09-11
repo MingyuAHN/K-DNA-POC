@@ -84,6 +84,41 @@ class RetrievedEvidence(BaseModel):
         default_factory=ContextTags
     )
 
+class RetrievedKnowledgeUnit(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid"
+    )
+
+    knowledge_id: UUID
+    knowledge_type: KnowledgeType
+    statement: str
+
+    context: ContextTags = Field(
+        default_factory=ContextTags
+    )
+
+    validation_status: Literal["VERIFIED"]
+
+    version: int = Field(
+        ge=1
+    )
+
+    confidence_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    )
+
+    similarity: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    )
+
+    decision_rule: Optional[dict] = None
+    rationale: Optional[str] = None
+    exception: Optional[str] = None
+
 
 # backend가 ai orchestrator에게 넘길 최상위 input 
 class InterviewAnalysisRequest(BaseModel):
@@ -104,6 +139,11 @@ class InterviewAnalysisRequest(BaseModel):
         default_factory=list
     )
 
+    retrieved_knowledge_units: List[
+        RetrievedKnowledgeUnit
+    ] = Field(
+        default_factory=list
+    )
 
 #AI Response Schema 
 class DecisionRule(BaseModel):
@@ -168,6 +208,11 @@ class SemanticAlignmentRequest(BaseModel):
         default_factory=list
     )
 
+    retrieved_knowledge_units: List[
+        RetrievedKnowledgeUnit
+    ] = Field(
+        default_factory=list
+    )
 
 class SemanticAlignmentResponse(BaseModel):
     relations: List[SemanticRelation] = Field(
@@ -197,10 +242,15 @@ class GapAnalysisRequest(BaseModel):
         default_factory=list
     )
 
-    retrieved_evidence: List[RetrievedEvidence] = Field(
+    retrieved_knowledge_units: List[
+        RetrievedKnowledgeUnit
+    ] = Field(
         default_factory=list
     )
 
+    retrieved_evidence: List[RetrievedEvidence] = Field(
+        default_factory=list
+    )
 
 # Gap Analyzer 전용 Response
 class GapAnalysisResponse(BaseModel):
@@ -245,6 +295,11 @@ class ConflictAnalysisRequest(BaseModel):
         default_factory=list
     )
 
+    retrieved_knowledge_units: List[
+        RetrievedKnowledgeUnit
+    ] = Field(
+        default_factory=list
+    )
 
 # Conflict Detector 전용 Response
 class ConflictAnalysisResponse(BaseModel):
