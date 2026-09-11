@@ -83,6 +83,49 @@ def _candidate_snapshot_mismatch_fields(
     return mismatches
 
 
+def _mark_synthesis_stale_for_target_change(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+    candidate: KnowledgeCandidate,
+    target_ids: list[uuid.UUID],
+    validated_by: str | None,
+    now: datetime,
+) -> None:
+    """
+    Human Review가 대기하는 동안 다른 Candidate가 먼저 승인되어
+    Synthesis가 참조하던 target Knowledge가 SUPERSEDED/RETIRED가
+    된 경우 기존 Synthesis를 그대로 적용하지 않는다.
+
+    Candidate는 REVIEW_REQUIRED 상태를 유지하고 synthesis 연결만
+    해제하여 Frontend가 재-Synthesis 후 다시 검토할 수 있게 한다.
+    """
+
+    target_text = ",".join(str(value) for value in target_ids)
+
+    synthesis.status = "STALE"
+    synthesis.validated_by = (
+        validated_by
+        or "K-DNA TARGET VERSION GUARD"
+    )
+    synthesis.validation_reason = (
+        "Target knowledge changed after synthesis creation; "
+        "re-synthesis is required. target_knowledge_ids="
+        + target_text
+    )
+    synthesis.validated_at = now
+
+    if candidate.review_status == "REVIEW_REQUIRED":
+        candidate.review_synthesis_id = None
+        candidate.review_reason = (
+            "Target knowledge changed while this candidate was "
+            "waiting for review; re-synthesis is required"
+        )
+
+    db.commit()
+    db.refresh(synthesis)
+    db.refresh(candidate)
+
+
 def _get_targets(
     db: Session,
     synthesis: KnowledgeSynthesis,
@@ -542,6 +585,45 @@ def validate_and_apply_synthesis(
         synthesis=synthesis,
     )
 
+    # ------------------------------------------------------
+    # Target-version stale guard
+    #
+    # Review Queue에 여러 Candidate가 같은 active Knowledge를 target으로
+    # 기다릴 수 있다. 그중 하나가 먼저 승인되어 target이 SUPERSEDED되면
+    # 나머지 Synthesis는 생성 시점의 Knowledge snapshot에 기반한 것이므로
+    # 재-Synthesis 없이 그대로 적용해서는 안 된다.
+    # ------------------------------------------------------
+    inactive_target_ids = [
+        target.knowledge_id
+        for target in targets
+        if target.status in {
+            "SUPERSEDED",
+            "RETIRED",
+        }
+    ]
+
+    if (
+        request.decision == "APPROVE"
+        and inactive_target_ids
+    ):
+        _mark_synthesis_stale_for_target_change(
+            db=db,
+            synthesis=synthesis,
+            candidate=candidate,
+            target_ids=inactive_target_ids,
+            validated_by=request.validated_by,
+            now=now,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Knowledge synthesis is stale because its target "
+                "knowledge is no longer active; create a new "
+                "synthesis before validation"
+            ),
+        )
+
     try:
         synthesis.status = "APPROVED"
 
@@ -586,20 +668,6 @@ def validate_and_apply_synthesis(
 
             target = targets[0]
             proposal = proposals[0]
-
-            if target.status in {
-                "SUPERSEDED",
-                "RETIRED",
-            }:
-                raise HTTPException(
-                    status_code=(
-                        status.HTTP_409_CONFLICT
-                    ),
-                    detail=(
-                        "Target knowledge is "
-                        "not an active version"
-                    ),
-                )
 
             root_id = (
                 target.root_knowledge_id

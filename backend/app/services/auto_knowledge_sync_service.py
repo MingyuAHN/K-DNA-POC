@@ -1,5 +1,5 @@
-# Safe refactor: behavior intentionally unchanged.
-# Orchestrates candidate idempotency, duplicate suppression, synthesis guardrails, and auto-apply.
+# Final Review policy: duplicate/no-op reuse may complete automatically, but every new or materially changed knowledge synthesis requires Human Review before VERIFIED apply.
+# Orchestrates candidate idempotency, duplicate suppression, synthesis preparation, review routing, and no-op reuse.
 
 import logging
 import re
@@ -22,9 +22,8 @@ from app.services.knowledge_synthesis_apply_service import validate_and_apply_sy
 from app.services.knowledge_synthesis_service import ACTIVE_KNOWLEDGE_STATUSES, synthesize_candidate
 logger = logging.getLogger(__name__)
 AUTO_VALIDATED_BY = 'K-DNA AUTO'
-AUTO_VALIDATION_REASON = 'PoC interview candidate automatic knowledge promotion'
+AUTO_NOOP_REUSE_REASON = 'No material knowledge change; reuse existing verified knowledge and attach interview evidence'
 AUTO_RETRY_REJECT_REASON = 'Unsafe automatic synthesis was rejected and regenerated with narrowed knowledge context'
-AUTO_MIN_CONFIDENCE_SCORE = 0.85
 RELATED_KNOWLEDGE_LIMIT = 1
 MIN_STATEMENT_JACCARD = 0.1
 
@@ -212,47 +211,6 @@ def _get_synthesis_units(
     )
 
 
-def _knowledge_root_id(
-    knowledge: KnowledgeUnit,
-) -> uuid.UUID:
-    return (
-        knowledge.root_knowledge_id
-        if knowledge.root_knowledge_id is not None
-        else knowledge.knowledge_id
-    )
-
-
-def _get_analysis_touched_root_ids(
-    db: Session,
-    candidate_ids: list[uuid.UUID],
-) -> set[uuid.UUID]:
-    """
-    같은 analysis의 이전 실행에서 이미 생성된 Knowledge까지 포함해
-    Root 단위 version inflation을 막는다.
-
-    한 Interview Turn에서 같은 Root를 여러 Candidate가 연속으로
-    자동 version-up 하는 대신, 첫 material update 이후의 추가
-    update는 Review Queue로 보낸다.
-    """
-    if not candidate_ids:
-        return set()
-
-    rows = (
-        db.query(KnowledgeUnit)
-        .filter(
-            KnowledgeUnit.source_candidate_id.in_(
-                candidate_ids
-            )
-        )
-        .all()
-    )
-
-    return {
-        _knowledge_root_id(row)
-        for row in rows
-    }
-
-
 def _mark_review_required(
     db: Session,
     candidate: KnowledgeCandidate,
@@ -260,11 +218,11 @@ def _mark_review_required(
     synthesis_id: uuid.UUID | None,
 ) -> None:
     """
-    Auto Sync가 사람 검토로 넘긴 상태를 DB에 영속화한다.
+    새로 생성되거나 기존 지식을 실질적으로 변경하는 Candidate를
+    Human Review Queue에 영속화한다.
 
-    review_synthesis_id:
-    - Low confidence 단계처럼 Synthesis 전이면 None
-    - Guardrail 단계처럼 Synthesis 후면 해당 synthesis_id
+    최종 표준 경로에서는 가능한 경우 Synthesis를 먼저 생성한 뒤
+    review_synthesis_id에 해당 synthesis_id를 저장한다.
     """
     candidate.review_status = "REVIEW_REQUIRED"
     candidate.review_reason = reason
@@ -489,12 +447,6 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
         )
     ]
 
-    analysis_touched_root_ids = (
-        _get_analysis_touched_root_ids(
-            db=db,
-            candidate_ids=candidate_ids,
-        )
-    )
 
     processed = 0
     skipped = 0
@@ -521,21 +473,6 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
             if existing_candidate_knowledge:
                 skipped += 1
                 items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='SKIPPED', synthesis_id=None, resulting_knowledge_ids=[row.knowledge_id for row in existing_candidate_knowledge], detail='Candidate already has a Knowledge Unit'))
-                continue
-            confidence_score = float(candidate.confidence_score) if candidate.confidence_score is not None else 0.0
-            if confidence_score < AUTO_MIN_CONFIDENCE_SCORE:
-                review_reason = (
-                    f'Candidate confidence {confidence_score:.2f} is below '
-                    f'automatic approval threshold {AUTO_MIN_CONFIDENCE_SCORE:.2f}'
-                )
-                _mark_review_required(
-                    db=db,
-                    candidate=candidate,
-                    reason=review_reason,
-                    synthesis_id=None,
-                )
-                review_required += 1
-                items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=None, resulting_knowledge_ids=[], detail=review_reason))
                 continue
             if _has_human_rejected_synthesis(syntheses):
                 skipped += 1
@@ -583,9 +520,14 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                 review_required += 1
                 items.append(AutoKnowledgeSyncItem(candidate_id=candidate_id, status='REVIEW_REQUIRED', synthesis_id=synthesis_id, resulting_knowledge_ids=[], detail=review_reason))
                 continue
-            version_root_id: uuid.UUID | None = None
-            material_assessment = None
-
+            # --------------------------------------------------
+            # Post-synthesis no-op suppression
+            # --------------------------------------------------
+            # Candidate 자체는 새로워 보여도 Synthesis 결과가 기존
+            # Knowledge의 단순 재서술이면 새 Version을 만들 필요가 없다.
+            # 이 경우에만 예외적으로 Human Review 없이 기존 VERIFIED
+            # Knowledge를 재사용하고 이번 Interview Message를 Evidence로
+            # 누적한다.
             if synthesis.operation in {
                 'ENRICH',
                 'SUPERSEDE',
@@ -603,26 +545,16 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                     len(version_targets) == 1
                     and len(version_proposals) == 1
                 ):
-                    version_target = version_targets[0]
-                    version_proposal = version_proposals[0]
-                    version_root_id = _knowledge_root_id(
-                        version_target
-                    )
-
                     material_assessment = (
                         assess_synthesized_unit_material_change(
-                            target=version_target,
-                            proposal=version_proposal,
+                            target=version_targets[0],
+                            proposal=version_proposals[0],
                             embedding_cache=(
                                 duplicate_embedding_cache
                             ),
                         )
                     )
 
-                    # Synthesis 결과가 기존 target의 단순 재서술이면
-                    # Apply Service의 no-op reuse path로 보내되,
-                    # Auto Sync 결과에서는 새 버전 생성이 아니므로
-                    # SKIPPED로 기록한다.
                     if not material_assessment.material_change:
                         apply_result = (
                             validate_and_apply_synthesis(
@@ -632,7 +564,7 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                                     KnowledgeSynthesisValidationRequest(
                                         decision='APPROVE',
                                         reason=(
-                                            AUTO_VALIDATION_REASON
+                                            AUTO_NOOP_REUSE_REASON
                                         ),
                                         validated_by=(
                                             AUTO_VALIDATED_BY
@@ -651,7 +583,7 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                             (
                                 'Synthesized proposal produced no '
                                 'material knowledge change; existing '
-                                'Knowledge Unit reused'
+                                'VERIFIED Knowledge Unit reused'
                             ),
                         )
                         detail_messages.append(
@@ -674,77 +606,41 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                         )
                         continue
 
-                    # 한 Turn에서 같은 Root를 연속으로 자동 갱신하면
-                    # Candidate 수만큼 version이 증가할 수 있다.
-                    # 첫 material update 이후 추가 update는 사람에게
-                    # 검토를 넘긴다.
-                    if (
-                        version_root_id
-                        in analysis_touched_root_ids
-                    ):
-                        review_reason = (
-                            'Same interview analysis already '
-                            'updated this knowledge root; '
-                            'additional material update requires '
-                            'manual review to prevent version '
-                            'inflation. '
-                            f'root_knowledge_id={version_root_id}'
-                        )
-
-                        _mark_review_required(
-                            db=db,
-                            candidate=candidate,
-                            reason=review_reason,
-                            synthesis_id=synthesis_id,
-                        )
-
-                        review_required += 1
-
-                        items.append(
-                            AutoKnowledgeSyncItem(
-                                candidate_id=candidate_id,
-                                status='REVIEW_REQUIRED',
-                                synthesis_id=synthesis_id,
-                                resulting_knowledge_ids=[],
-                                detail=review_reason,
-                            )
-                        )
-                        continue
-
-            apply_result = validate_and_apply_synthesis(
-                db=db,
-                synthesis_id=synthesis_id,
-                request=KnowledgeSynthesisValidationRequest(
-                    decision='APPROVE',
-                    reason=AUTO_VALIDATION_REASON,
-                    validated_by=AUTO_VALIDATED_BY,
-                ),
-                material_change_embedding_cache=(
-                    duplicate_embedding_cache
-                ),
+            # --------------------------------------------------
+            # Final policy: Human Review before VERIFIED
+            # --------------------------------------------------
+            # Duplicate/no-op이 아닌 모든 신규/실질 변경 Candidate는
+            # Synthesis까지만 자동 준비하고 여기서 멈춘다.
+            # 실제 Knowledge Unit 생성, Version 변경, Relation 적용,
+            # VERIFIED 승격은 Review 화면의 Accurate(APPROVE) 이후에만
+            # validate_and_apply_synthesis()가 수행한다.
+            review_reason = (
+                'Human review is required before applying synthesized '
+                'knowledge and promoting the candidate to VERIFIED'
             )
 
-            if version_root_id is not None:
-                analysis_touched_root_ids.add(
-                    version_root_id
-                )
+            _mark_review_required(
+                db=db,
+                candidate=candidate,
+                reason=review_reason,
+                synthesis_id=synthesis_id,
+            )
 
-            processed += 1
+            review_required += 1
             detail_messages.insert(
                 0,
                 (
-                    'Candidate synthesized and applied '
-                    'successfully'
+                    'Candidate synthesized successfully; awaiting '
+                    'Human Review before Knowledge Unit apply/VERIFIED'
                 ),
             )
+
             items.append(
                 AutoKnowledgeSyncItem(
                     candidate_id=candidate_id,
-                    status='APPLIED',
+                    status='REVIEW_REQUIRED',
                     synthesis_id=synthesis_id,
-                    resulting_knowledge_ids=(
-                        apply_result.resulting_knowledge_ids
-                    ),
+                    resulting_knowledge_ids=[],
                     detail='. '.join(detail_messages),
                 )
             )
