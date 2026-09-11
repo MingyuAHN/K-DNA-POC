@@ -136,8 +136,8 @@ export type SynthesisDecision =
 
 export type KnowledgeSynthesisValidationRequest = {
   decision: SynthesisDecision;
-  reason: string | null;
-  validated_by: string | null;
+  reason: string;
+  validated_by: string;
 };
 
 export type AppliedKnowledgeUnit = {

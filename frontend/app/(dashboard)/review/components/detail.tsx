@@ -1,9 +1,18 @@
 "use client";
 
 import {
-  BookOpenCheck,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+
+import {
+  Check,
   CheckCircle2,
+  ChevronDown,
   CircleX,
+  FileSearch,
   FileText,
   PencilLine,
   Save,
@@ -12,11 +21,6 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-
-import {
-  useEffect,
-  useState,
-} from "react";
 
 import type {
   KnowledgeCandidateEditRequest,
@@ -60,6 +64,12 @@ const knowledgeTypes: KnowledgeType[] = [
   "EXPERT_OPINION",
 ];
 
+const inputClass =
+  "h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
+
+const textareaClass =
+  "w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700 outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
+
 export default function ReviewDetail({
   candidate,
   processingAction,
@@ -73,19 +83,39 @@ export default function ReviewDetail({
   const [statement, setStatement] =
     useState("");
 
-  const [knowledgeType, setKnowledgeType] =
-    useState<KnowledgeType>("FACT");
+  const [
+    knowledgeType,
+    setKnowledgeType,
+  ] = useState<KnowledgeType>("FACT");
 
-  const [contextText, setContextText] =
-    useState("{}");
+  // Context
+  const [domain, setDomain] =
+    useState("");
+
+  const [scope, setScope] =
+    useState("");
+
+  const [phase, setPhase] =
+    useState("");
 
   const [
-    decisionRuleText,
-    setDecisionRuleText,
+    constraints,
+    setConstraints,
   ] = useState("");
 
-  const [rationale, setRationale] =
+  // Decision Rule
+  const [
+    ifConditions,
+    setIfConditions,
+  ] = useState("");
+
+  const [thenRule, setThenRule] =
     useState("");
+
+  const [
+    unlessConditions,
+    setUnlessConditions,
+  ] = useState("");
 
   const [exception, setException] =
     useState("");
@@ -93,53 +123,16 @@ export default function ReviewDetail({
   const [editReason, setEditReason] =
     useState("");
 
-  const [
-    editError,
-    setEditError,
-  ] = useState("");
+  const [editError, setEditError] =
+    useState("");
 
-  // Candidate 변경 시 편집값 초기화
+  // Candidate 초기화
   useEffect(() => {
     if (!candidate) {
       return;
     }
 
-    setStatement(
-      candidate.statement
-    );
-
-    setKnowledgeType(
-      candidate.knowledge_type as KnowledgeType
-    );
-
-    setContextText(
-      JSON.stringify(
-        candidate.context ?? {},
-        null,
-        2
-      )
-    );
-
-    setDecisionRuleText(
-      candidate.decision_rule
-        ? JSON.stringify(
-            candidate.decision_rule,
-            null,
-            2
-          )
-        : ""
-    );
-
-    setRationale(
-      candidate.rationale ?? ""
-    );
-
-    setException(
-      candidate.exception ?? ""
-    );
-
-    setEditReason("");
-    setEditError("");
+    resetEditValues(candidate);
     setIsEditing(false);
   }, [candidate]);
 
@@ -162,6 +155,78 @@ export default function ReviewDetail({
   const isProcessing =
     processingAction !== null;
 
+  // 편집값 초기화
+  function resetEditValues(
+    target: KnowledgeReviewCandidate
+  ) {
+    const context =
+      target.context ?? {};
+
+    const rule =
+      target.decision_rule;
+
+    setStatement(target.statement);
+
+    setKnowledgeType(
+      toKnowledgeType(
+        target.knowledge_type
+      )
+    );
+
+    setDomain(
+      getStringValue(
+        context.domain
+      )
+    );
+
+    setScope(
+      getStringValue(
+        context.scope
+      )
+    );
+
+    setPhase(
+      getStringValue(
+        context.phase
+      )
+    );
+
+    setConstraints(
+      getStringArray(
+        context.constraints
+      ).join(", ")
+    );
+
+    setIfConditions(
+      getRuleArray(
+        rule,
+        "if_conditions",
+        "if"
+      ).join("\n")
+    );
+
+    setThenRule(
+      getRuleString(
+        rule,
+        "then"
+      )
+    );
+
+    setUnlessConditions(
+      getRuleArray(
+        rule,
+        "unless"
+      ).join("\n")
+    );
+
+    setException(
+      target.exception ?? ""
+    );
+
+    setEditReason("");
+    setEditError("");
+  }
+
   // 편집 시작
   const handleStartEdit = () => {
     setEditError("");
@@ -170,42 +235,7 @@ export default function ReviewDetail({
 
   // 편집 취소
   const handleCancelEdit = () => {
-    setStatement(
-      candidate.statement
-    );
-
-    setKnowledgeType(
-      candidate.knowledge_type as KnowledgeType
-    );
-
-    setContextText(
-      JSON.stringify(
-        candidate.context ?? {},
-        null,
-        2
-      )
-    );
-
-    setDecisionRuleText(
-      candidate.decision_rule
-        ? JSON.stringify(
-            candidate.decision_rule,
-            null,
-            2
-          )
-        : ""
-    );
-
-    setRationale(
-      candidate.rationale ?? ""
-    );
-
-    setException(
-      candidate.exception ?? ""
-    );
-
-    setEditReason("");
-    setEditError("");
+    resetEditValues(candidate);
     setIsEditing(false);
   };
 
@@ -218,56 +248,75 @@ export default function ReviewDetail({
       return;
     }
 
-    try {
-      const parsedContext =
-        contextText.trim()
-          ? JSON.parse(contextText)
-          : {};
+    const parsedIfConditions =
+      splitLines(ifConditions);
 
-      const parsedDecisionRule =
-        decisionRuleText.trim()
-          ? JSON.parse(
-              decisionRuleText
-            )
-          : null;
-
-      if (
-        parsedDecisionRule &&
-        typeof parsedDecisionRule.then !==
-          "string"
-      ) {
-        setEditError(
-          "판단 규칙의 then 값은 문자열이어야 합니다."
-        );
-        return;
-      }
-
-      setEditError("");
-
-      onSaveEdit({
-        statement:
-          statement.trim(),
-        knowledge_type:
-          knowledgeType,
-        context:
-          parsedContext,
-        decision_rule:
-          parsedDecisionRule,
-        rationale:
-          rationale.trim() ||
-          null,
-        exception:
-          exception.trim() ||
-          null,
-        edit_reason:
-          editReason.trim() ||
-          null,
-      });
-    } catch {
-      setEditError(
-        "Context 또는 Decision Rule의 JSON 형식을 확인해주세요."
+    const parsedUnless =
+      splitLines(
+        unlessConditions
       );
+
+    const hasDecisionRule =
+      parsedIfConditions.length > 0 ||
+      Boolean(thenRule.trim()) ||
+      parsedUnless.length > 0;
+
+    if (
+      hasDecisionRule &&
+      !thenRule.trim()
+    ) {
+      setEditError(
+        "판단 규칙을 입력한 경우 THEN 값이 필요합니다."
+      );
+      return;
     }
+
+    setEditError("");
+
+    onSaveEdit({
+      statement:
+        statement.trim(),
+
+      knowledge_type:
+        knowledgeType,
+
+      // 표시하지 않은 Context 값은 유지
+      context: {
+        ...candidate.context,
+
+        domain:
+          domain.trim() || null,
+
+        scope:
+          scope.trim() || null,
+
+        phase:
+          phase.trim() || null,
+
+        constraints:
+          splitCommaValues(
+            constraints
+          ),
+      },
+
+      decision_rule:
+        hasDecisionRule
+          ? {
+              if_conditions:
+                parsedIfConditions,
+              then:
+                thenRule.trim(),
+              unless:
+                parsedUnless,
+            }
+          : null,
+
+      exception:
+        exception.trim() || null,
+
+      edit_reason:
+        editReason.trim() || null,
+    });
   };
 
   return (
@@ -297,6 +346,7 @@ export default function ReviewDetail({
             </p>
           </div>
 
+          {/* Confidence */}
           <div className="shrink-0 rounded-2xl bg-blue-50 px-4 py-3 text-right">
             <p className="text-[11px] font-bold text-slate-400">
               AI Confidence
@@ -315,12 +365,21 @@ export default function ReviewDetail({
         <EditForm
           statement={statement}
           knowledgeType={knowledgeType}
-          contextText={contextText}
-          decisionRuleText={decisionRuleText}
-          rationale={rationale}
+          domain={domain}
+          scope={scope}
+          phase={phase}
+          constraints={constraints}
+          ifConditions={ifConditions}
+          thenRule={thenRule}
+          unlessConditions={
+            unlessConditions
+          }
           exception={exception}
           editReason={editReason}
           editError={editError}
+          sourceMessageId={
+            candidate.source_message_id
+          }
           isSaving={
             processingAction === "EDIT"
           }
@@ -330,14 +389,26 @@ export default function ReviewDetail({
           onKnowledgeTypeChange={
             setKnowledgeType
           }
-          onContextChange={
-            setContextText
+          onDomainChange={
+            setDomain
           }
-          onDecisionRuleChange={
-            setDecisionRuleText
+          onScopeChange={
+            setScope
           }
-          onRationaleChange={
-            setRationale
+          onPhaseChange={
+            setPhase
+          }
+          onConstraintsChange={
+            setConstraints
+          }
+          onIfConditionsChange={
+            setIfConditions
+          }
+          onThenRuleChange={
+            setThenRule
+          }
+          onUnlessConditionsChange={
+            setUnlessConditions
           }
           onExceptionChange={
             setException
@@ -354,7 +425,7 @@ export default function ReviewDetail({
         />
       ) : (
         <>
-          {/* 추출 지식 */}
+          {/* Knowledge */}
           <ContentCard
             title="추출 지식"
             subtitle="Knowledge"
@@ -365,8 +436,8 @@ export default function ReviewDetail({
             highlight
           />
 
-          {/* 지식 상세 */}
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {/* 핵심 정보 */}
+          <div className="grid gap-3 lg:grid-cols-2">
             <ContentCard
               title="적용 맥락"
               subtitle="Context"
@@ -386,15 +457,6 @@ export default function ReviewDetail({
             />
 
             <ContentCard
-              title="판단 근거"
-              subtitle="Rationale"
-              icon={BookOpenCheck}
-              content={formatNullableText(
-                candidate.rationale
-              )}
-            />
-
-            <ContentCard
               title="예외 조건"
               subtitle="Exception"
               icon={CircleX}
@@ -402,56 +464,19 @@ export default function ReviewDetail({
                 candidate.exception
               )}
             />
+
+            <ContentCard
+              title="근거"
+              subtitle="Evidence"
+              icon={FileSearch}
+              content={
+                `Source Message\n${candidate.source_message_id}\n\n` +
+                "현재 Review API에서는 Evidence 원문을 제공하지 않습니다."
+              }
+            />
           </div>
         </>
       )}
-
-      {/* Review 상태 */}
-      <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4">
-          <h3 className="text-sm font-black text-slate-900">
-            Review 분석
-          </h3>
-
-          <p className="mt-1 text-[11px] font-semibold text-slate-400">
-            Review &amp; Synthesis
-          </p>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <InfoItem
-            label="Review 사유"
-            value={
-              candidate.review_reason ||
-              "별도 Review 사유가 없습니다."
-            }
-          />
-
-          <InfoItem
-            label="Synthesis 상태"
-            value={
-              candidate.synthesis_status ||
-              "아직 Synthesis가 생성되지 않았습니다."
-            }
-          />
-
-          <InfoItem
-            label="Synthesis Operation"
-            value={
-              candidate.synthesis_operation ||
-              "-"
-            }
-          />
-
-          <InfoItem
-            label="Synthesis 사유"
-            value={
-              candidate.synthesis_reason ||
-              "-"
-            }
-          />
-        </div>
-      </div>
 
       {/* 검토 액션 */}
       {!isEditing && (
@@ -516,12 +541,21 @@ export default function ReviewDetail({
 type EditFormProps = {
   statement: string;
   knowledgeType: KnowledgeType;
-  contextText: string;
-  decisionRuleText: string;
-  rationale: string;
+
+  domain: string;
+  scope: string;
+  phase: string;
+  constraints: string;
+
+  ifConditions: string;
+  thenRule: string;
+  unlessConditions: string;
+
   exception: string;
   editReason: string;
   editError: string;
+
+  sourceMessageId: string;
   isSaving: boolean;
 
   onStatementChange: (
@@ -532,15 +566,31 @@ type EditFormProps = {
     value: KnowledgeType
   ) => void;
 
-  onContextChange: (
+  onDomainChange: (
     value: string
   ) => void;
 
-  onDecisionRuleChange: (
+  onScopeChange: (
     value: string
   ) => void;
 
-  onRationaleChange: (
+  onPhaseChange: (
+    value: string
+  ) => void;
+
+  onConstraintsChange: (
+    value: string
+  ) => void;
+
+  onIfConditionsChange: (
+    value: string
+  ) => void;
+
+  onThenRuleChange: (
+    value: string
+  ) => void;
+
+  onUnlessConditionsChange: (
     value: string
   ) => void;
 
@@ -559,18 +609,27 @@ type EditFormProps = {
 function EditForm({
   statement,
   knowledgeType,
-  contextText,
-  decisionRuleText,
-  rationale,
+  domain,
+  scope,
+  phase,
+  constraints,
+  ifConditions,
+  thenRule,
+  unlessConditions,
   exception,
   editReason,
   editError,
+  sourceMessageId,
   isSaving,
   onStatementChange,
   onKnowledgeTypeChange,
-  onContextChange,
-  onDecisionRuleChange,
-  onRationaleChange,
+  onDomainChange,
+  onScopeChange,
+  onPhaseChange,
+  onConstraintsChange,
+  onIfConditionsChange,
+  onThenRuleChange,
+  onUnlessConditionsChange,
   onExceptionChange,
   onEditReasonChange,
   onSave,
@@ -593,7 +652,7 @@ function EditForm({
         </p>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-5">
         {/* Knowledge */}
         <EditField label="추출 지식">
           <textarea
@@ -603,107 +662,182 @@ function EditForm({
                 event.target.value
               )
             }
-            rows={3}
-            className="w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            rows={2}
+            className={textareaClass}
           />
         </EditField>
 
-        {/* Type */}
+        {/* 지식 유형 */}
         <EditField label="Knowledge Type">
-          <select
+          <KnowledgeTypeDropdown
             value={knowledgeType}
-            onChange={(event) =>
-              onKnowledgeTypeChange(
-                event.target
-                  .value as KnowledgeType
-              )
+            disabled={isSaving}
+            onChange={
+              onKnowledgeTypeChange
             }
-            className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-          >
-            {knowledgeTypes.map(
-              (type) => (
-                <option
-                  key={type}
-                  value={type}
-                >
-                  {formatKnowledgeType(
-                    type
-                  )}
-                </option>
-              )
-            )}
-          </select>
+          />
         </EditField>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* Context */}
-          <EditField label="적용 맥락">
-            <textarea
-              value={contextText}
-              onChange={(event) =>
-                onContextChange(
-                  event.target.value
-                )
-              }
-              rows={8}
-              spellCheck={false}
-              className="w-full resize-y rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 font-mono text-xs leading-5 text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            />
-          </EditField>
+        {/* Context */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+          <SectionTitle
+            icon={FileText}
+            title="적용 맥락"
+            subtitle="Context"
+          />
 
-          {/* Rule */}
-          <EditField label="판단 규칙">
-            <textarea
-              value={decisionRuleText}
-              onChange={(event) =>
-                onDecisionRuleChange(
-                  event.target.value
-                )
-              }
-              rows={8}
-              spellCheck={false}
-              placeholder="판단 규칙이 없으면 비워두세요."
-              className="w-full resize-y rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 font-mono text-xs leading-5 text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            />
-          </EditField>
+          <div className="grid gap-4 md:grid-cols-2">
+            <EditField label="도메인">
+              <input
+                value={domain}
+                onChange={(event) =>
+                  onDomainChange(
+                    event.target.value
+                  )
+                }
+                placeholder="예: MSA Architecture"
+                className={inputClass}
+              />
+            </EditField>
+
+            <EditField label="적용 범위">
+              <input
+                value={scope}
+                onChange={(event) =>
+                  onScopeChange(
+                    event.target.value
+                  )
+                }
+                placeholder="예: 서비스 DB 분리"
+                className={inputClass}
+              />
+            </EditField>
+
+            <EditField label="단계">
+              <input
+                value={phase}
+                onChange={(event) =>
+                  onPhaseChange(
+                    event.target.value
+                  )
+                }
+                placeholder="예: 전환 단계"
+                className={inputClass}
+              />
+            </EditField>
+
+            <EditField label="제약 조건">
+              <input
+                value={constraints}
+                onChange={(event) =>
+                  onConstraintsChange(
+                    event.target.value
+                  )
+                }
+                placeholder="여러 개면 쉼표로 구분"
+                className={inputClass}
+              />
+            </EditField>
+          </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* Rationale */}
-          <EditField label="판단 근거">
-            <textarea
-              value={rationale}
-              onChange={(event) =>
-                onRationaleChange(
-                  event.target.value
-                )
-              }
-              rows={4}
-              placeholder="판단 근거"
-              className="w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            />
-          </EditField>
+        {/* Rule */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+          <SectionTitle
+            icon={ShieldCheck}
+            title="판단 규칙"
+            subtitle="Rule"
+          />
 
-          {/* Exception */}
-          <EditField label="예외 조건">
-            <textarea
-              value={exception}
-              onChange={(event) =>
-                onExceptionChange(
-                  event.target.value
-                )
-              }
-              rows={4}
-              placeholder="예외 조건"
-              className="w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            />
-          </EditField>
+          <div className="space-y-4">
+            <EditField
+              label="IF"
+              description="여러 조건은 줄바꿈으로 구분합니다."
+            >
+              <textarea
+                value={ifConditions}
+                onChange={(event) =>
+                  onIfConditionsChange(
+                    event.target.value
+                  )
+                }
+                rows={2}
+                placeholder="판단 조건"
+                className={textareaClass}
+              />
+            </EditField>
+
+            <EditField label="THEN">
+              <textarea
+                value={thenRule}
+                onChange={(event) =>
+                  onThenRuleChange(
+                    event.target.value
+                  )
+                }
+                rows={2}
+                placeholder="조건 충족 시 판단"
+                className={textareaClass}
+              />
+            </EditField>
+
+            <EditField
+              label="UNLESS"
+              description="예외가 없으면 비워두세요."
+            >
+              <textarea
+                value={
+                  unlessConditions
+                }
+                onChange={(event) =>
+                  onUnlessConditionsChange(
+                    event.target.value
+                  )
+                }
+                rows={2}
+                placeholder="판단 규칙의 예외"
+                className={textareaClass}
+              />
+            </EditField>
+          </div>
+        </div>
+
+        {/* Exception */}
+        <EditField label="예외 조건">
+          <textarea
+            value={exception}
+            onChange={(event) =>
+              onExceptionChange(
+                event.target.value
+              )
+            }
+            rows={2}
+            placeholder="지식 자체의 예외 조건"
+            className={textareaClass}
+          />
+        </EditField>
+
+        {/* Evidence */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <SectionTitle
+            icon={FileSearch}
+            title="근거"
+            subtitle="Evidence"
+          />
+
+          <p className="break-all text-xs font-semibold text-slate-700">
+            Source Message:{" "}
+            {sourceMessageId}
+          </p>
+
+          <p className="mt-2 text-[11px] font-semibold text-slate-400">
+            현재 Review API에서는 Evidence 원문을 제공하지 않습니다.
+          </p>
         </div>
 
         {/* 수정 사유 */}
         <EditField label="수정 사유">
           <input
-            type="text"
             value={editReason}
             onChange={(event) =>
               onEditReasonChange(
@@ -711,7 +845,7 @@ function EditForm({
               )
             }
             placeholder="예: 전문가 검토 후 표현 보완"
-            className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            className={inputClass}
           />
         </EditField>
 
@@ -722,13 +856,13 @@ function EditForm({
         )}
       </div>
 
-      {/* 저장 / 취소 */}
+      {/* 액션 */}
       <div className="mt-5 flex justify-end gap-2">
         <button
           type="button"
           disabled={isSaving}
           onClick={onCancel}
-          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
         >
           <X className="h-4 w-4" />
           취소
@@ -741,7 +875,7 @@ function EditForm({
             !statement.trim()
           }
           onClick={onSave}
-          className="flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+          className="flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:bg-blue-300"
         >
           <Save className="h-4 w-4" />
 
@@ -754,20 +888,179 @@ function EditForm({
   );
 }
 
+function KnowledgeTypeDropdown({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: KnowledgeType;
+  disabled: boolean;
+  onChange: (
+    value: KnowledgeType
+  ) => void;
+}) {
+  const [
+    isOpen,
+    setIsOpen,
+  ] = useState(false);
+
+  const containerRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
+
+  // 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleMouseDown = (
+      event: MouseEvent
+    ) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(
+          event.target as Node
+        )
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener(
+      "mousedown",
+      handleMouseDown
+    );
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleMouseDown
+      );
+    };
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative"
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          setIsOpen(
+            (current) => !current
+          )
+        }
+        className={`flex min-h-[46px] w-full items-center justify-between rounded-xl border bg-white px-4 py-2.5 text-left transition ${
+          isOpen
+            ? "border-blue-400 ring-4 ring-blue-100"
+            : "border-slate-300 hover:border-slate-400"
+        }`}
+      >
+        <span className="text-sm font-black text-slate-800">
+          {formatKnowledgeType(
+            value
+          )}
+        </span>
+
+        <ChevronDown
+          className={`h-4 w-4 text-slate-400 transition ${
+            isOpen
+              ? "rotate-180"
+              : ""
+          }`}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
+          {knowledgeTypes.map(
+            (type) => {
+              const isSelected =
+                type === value;
+
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => {
+                    onChange(type);
+                    setIsOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 ${
+                    isSelected
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="text-sm font-bold">
+                    {formatKnowledgeType(
+                      type
+                    )}
+                  </span>
+
+                  {isSelected && (
+                    <Check className="h-4 w-4" />
+                  )}
+                </button>
+              );
+            }
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditField({
   label,
+  description,
   children,
 }: {
   label: string;
-  children: React.ReactNode;
+  description?: string;
+  children: ReactNode;
 }) {
   return (
     <div>
-      <label className="mb-2 block text-xs font-black text-slate-600">
+      <label className="block text-xs font-black text-slate-600">
         {label}
       </label>
 
-      {children}
+      {description && (
+        <p className="mt-0.5 text-[10px] font-semibold text-slate-400">
+          {description}
+        </p>
+      )}
+
+      <div className="mt-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({
+  icon: Icon,
+  title,
+  subtitle,
+}: {
+  icon: typeof FileText;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <div className="mb-4 flex items-center gap-2">
+      <Icon className="h-4 w-4 text-blue-600" />
+
+      <div>
+        <p className="text-xs font-black text-slate-800">
+          {title}
+        </p>
+
+        <p className="text-[10px] font-semibold text-slate-400">
+          {subtitle}
+        </p>
+      </div>
     </div>
   );
 }
@@ -795,7 +1088,7 @@ function ContentCard({
     >
       <div className="mb-3 flex items-center gap-3">
         <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+          className={`flex h-9 w-9 items-center justify-center rounded-xl ${
             highlight
               ? "bg-blue-100 text-blue-600"
               : "bg-slate-100 text-slate-600"
@@ -815,29 +1108,101 @@ function ContentCard({
         </div>
       </div>
 
-      <p className="whitespace-pre-line text-xs font-semibold leading-6 text-slate-700">
+      <p className="whitespace-pre-line break-words text-xs font-semibold leading-6 text-slate-700">
         {content}
       </p>
     </div>
   );
 }
 
-function InfoItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-      <p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-400">
-        {label}
-      </p>
+function toKnowledgeType(
+  value: string
+): KnowledgeType {
+  const type =
+    value as KnowledgeType;
 
-      <p className="mt-2 whitespace-pre-line text-xs font-semibold leading-5 text-slate-700">
-        {value}
-      </p>
-    </div>
+  return knowledgeTypes.includes(type)
+    ? type
+    : "FACT";
+}
+
+function getStringValue(
+  value: unknown
+) {
+  return typeof value === "string"
+    ? value
+    : "";
+}
+
+function getStringArray(
+  value: unknown
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string"
   );
+}
+
+function getRuleString(
+  rule: Record<string, unknown> | null,
+  key: string
+) {
+  if (!rule) {
+    return "";
+  }
+
+  return getStringValue(
+    rule[key]
+  );
+}
+
+function getRuleArray(
+  rule: Record<string, unknown> | null,
+  key: string,
+  fallbackKey?: string
+) {
+  if (!rule) {
+    return [];
+  }
+
+  const primary =
+    getStringArray(rule[key]);
+
+  if (primary.length > 0) {
+    return primary;
+  }
+
+  if (!fallbackKey) {
+    return [];
+  }
+
+  return getStringArray(
+    rule[fallbackKey]
+  );
+}
+
+function splitCommaValues(
+  value: string
+) {
+  return value
+    .split(",")
+    .map((item) =>
+      item.trim()
+    )
+    .filter(Boolean);
+}
+
+function splitLines(
+  value: string
+) {
+  return value
+    .split("\n")
+    .map((item) =>
+      item.trim()
+    )
+    .filter(Boolean);
 }
