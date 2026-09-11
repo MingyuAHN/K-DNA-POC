@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from app.models.interview_message import (
     InterviewMessage,
 )
+from app.models.knowledge_core import (
+    KnowledgeUnit,
+)
 from app.schemas.interview_context import (
     ConversationMessageItem,
     CurrentMessageItem,
@@ -15,6 +18,7 @@ from app.schemas.interview_context import (
     MissionContextItem,
     RetrievedEvidenceItem,
     RetrievedKnowledgeItem,
+    RetrievedKnowledgeUnitItem,
 )
 from app.services.interview_service import (
     get_interview,
@@ -71,6 +75,44 @@ def get_previous_messages(
     rows.reverse()
 
     return rows
+
+
+def get_active_verified_knowledge_units(
+    db: Session,
+    mission_id: uuid.UUID,
+) -> list[KnowledgeUnit]:
+    """
+    AI retrieved_knowledge_units v1 Contract.
+
+    같은 Mission에서 현재 활성 상태이면서
+    검증 완료된 Knowledge Unit만 전달한다.
+
+    현재 Knowledge version 정책:
+    - 현재 활성 version: VERIFIED
+    - 이전 version: SUPERSEDED
+
+    따라서 v1에서는 status == VERIFIED를
+    current/active 조건으로 사용한다.
+
+    Knowledge Unit 전용 embedding retrieval은
+    아직 없으므로 similarity는 Context DTO에서
+    null로 전달한다.
+    """
+
+    return (
+        db.query(KnowledgeUnit)
+        .filter(
+            KnowledgeUnit.mission_id
+            == mission_id,
+            KnowledgeUnit.status
+            == "VERIFIED",
+        )
+        .order_by(
+            KnowledgeUnit.updated_at.desc(),
+            KnowledgeUnit.created_at.desc(),
+        )
+        .all()
+    )
 
 
 def build_interview_context(
@@ -167,14 +209,28 @@ def build_interview_context(
     ]
 
     retrieved_knowledge = []
+    retrieved_knowledge_units = []
     retrieved_evidence = []
 
     # ----------------------------------------
     # 5. Retrieval
     #
-    # 동일 사용자 메시지에 대해 Query Embedding은
-    # 딱 한 번만 생성하고,
-    # Claim / Chunk 검색에 함께 사용
+    # retrieved_knowledge
+    #   → Baseline Claim 전용
+    #
+    # retrieved_knowledge_units
+    #   → 같은 Mission의 current/active
+    #     + VERIFIED Knowledge Unit
+    #
+    # retrieved_evidence
+    #   → Document Chunk
+    #
+    # Baseline Claim / Chunk 검색에 필요한
+    # Query Embedding은 동일 Message에 대해
+    # 한 번만 생성한다.
+    #
+    # Knowledge Unit은 현재 별도 embedding이
+    # 없으므로 Mission + VERIFIED 조건으로 조회.
     # ----------------------------------------
     if request.include_retrieval:
 
@@ -200,6 +256,13 @@ def build_interview_context(
             )
         )
 
+        knowledge_unit_results = (
+            get_active_verified_knowledge_units(
+                db=db,
+                mission_id=mission.mission_id,
+            )
+        )
+
         retrieved_knowledge = [
             RetrievedKnowledgeItem(
                 claim_id=row.id,
@@ -218,6 +281,38 @@ def build_interview_context(
             )
             for row in knowledge_results
             if row.source_chunk_id is not None
+        ]
+
+        retrieved_knowledge_units = [
+            RetrievedKnowledgeUnitItem(
+                knowledge_id=(
+                    row.knowledge_id
+                ),
+                knowledge_type=(
+                    row.knowledge_type
+                ),
+                statement=row.statement,
+                context=(
+                    row.context or {}
+                ),
+                validation_status="VERIFIED",
+                version=row.version,
+                confidence_score=(
+                    float(
+                        row.confidence_score
+                    )
+                    if row.confidence_score
+                    is not None
+                    else None
+                ),
+                similarity=None,
+                decision_rule=(
+                    row.decision_rule
+                ),
+                rationale=row.rationale,
+                exception=row.exception,
+            )
+            for row in knowledge_unit_results
         ]
 
         retrieved_evidence = [
@@ -261,6 +356,9 @@ def build_interview_context(
         ),
         retrieved_knowledge=(
             retrieved_knowledge
+        ),
+        retrieved_knowledge_units=(
+            retrieved_knowledge_units
         ),
         retrieved_evidence=(
             retrieved_evidence

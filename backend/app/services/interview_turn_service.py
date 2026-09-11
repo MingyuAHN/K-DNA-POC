@@ -117,14 +117,30 @@ def run_interview_turn(
             request=InterviewContextPreviewRequest(
                 message_id=user_message.message_id,
                 include_retrieval=True,
-                knowledge_top_k=request.knowledge_top_k,
-                evidence_top_k=request.evidence_top_k,
-                history_limit=request.history_limit,
+                knowledge_top_k=(
+                    request.knowledge_top_k
+                ),
+                evidence_top_k=(
+                    request.evidence_top_k
+                ),
+                history_limit=(
+                    request.history_limit
+                ),
             ),
         )
 
         # -----------------------------------------------------
         # 4. AI 요청 Payload 생성
+        #
+        # retrieved_knowledge
+        #   → Baseline Claim
+        #
+        # retrieved_knowledge_units
+        #   → 동일 Mission의 current/active
+        #     + VERIFIED Knowledge Unit
+        #
+        # retrieved_evidence
+        #   → Document Chunk
         # -----------------------------------------------------
         ai_payload = {
             "mission": (
@@ -155,6 +171,13 @@ def run_interview_turn(
                 )
                 for item
                 in context.retrieved_knowledge
+            ],
+            "retrieved_knowledge_units": [
+                item.model_dump(
+                    mode="json",
+                )
+                for item
+                in context.retrieved_knowledge_units
             ],
             "retrieved_evidence": [
                 item.model_dump(
@@ -203,7 +226,9 @@ def run_interview_turn(
             db=db,
             mission_id=interview.mission_id,
             interview_id=interview_id,
-            source_message_id=user_message.message_id,
+            source_message_id=(
+                user_message.message_id
+            ),
             assistant_message_id=(
                 assistant_message.message_id
                 if assistant_message is not None
@@ -218,7 +243,9 @@ def run_interview_turn(
         # -----------------------------------------------------
         if assistant_message is not None:
             assistant_message.metadata_ = {
-                "source": "INTERVIEW_ORCHESTRATION",
+                "source": (
+                    "INTERVIEW_ORCHESTRATION"
+                ),
                 "analysis_id": str(
                     analysis.analysis_id
                 ),
@@ -337,7 +364,9 @@ def run_interview_turn(
         return InterviewTurnResponse(
             analysis_id=analysis.analysis_id,
             interview_id=interview_id,
-            user_message_id=user_message.message_id,
+            user_message_id=(
+                user_message.message_id
+            ),
             assistant_message_id=(
                 assistant_message.message_id
                 if assistant_message is not None

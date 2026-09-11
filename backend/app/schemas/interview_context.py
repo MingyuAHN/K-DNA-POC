@@ -1,7 +1,37 @@
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+KnowledgeType = Literal[
+    "FACT",
+    "PRINCIPLE",
+    "DECISION_RULE",
+    "HEURISTIC",
+    "EXCEPTION",
+    "FAILURE_LESSON",
+    "TRADE_OFF",
+    "EXPERT_OPINION",
+]
+
+
+class ContextTags(BaseModel):
+    project: str | None = None
+    phase: str | None = None
+    domain: str | None = None
+    system: str | None = None
+    scope: str | None = None
+    time: str | None = None
+
+    constraints: list[str] = Field(
+        default_factory=list,
+    )
+
+    tags: list[str] = Field(
+        default_factory=list,
+    )
 
 
 class InterviewContextPreviewRequest(BaseModel):
@@ -79,6 +109,45 @@ class RetrievedKnowledgeItem(BaseModel):
     section: str | None = None
 
 
+class RetrievedKnowledgeUnitItem(BaseModel):
+    knowledge_id: uuid.UUID
+
+    knowledge_type: KnowledgeType
+    statement: str
+
+    context: ContextTags = Field(
+        default_factory=ContextTags,
+    )
+
+    validation_status: Literal[
+        "VERIFIED"
+    ]
+
+    version: int = Field(
+        ge=1,
+    )
+
+    confidence_score: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+    )
+
+    similarity: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+    )
+
+    decision_rule: dict[
+        str,
+        Any,
+    ] | None = None
+
+    rationale: str | None = None
+    exception: str | None = None
+
+
 class RetrievedEvidenceItem(BaseModel):
     chunk_id: uuid.UUID
 
@@ -104,6 +173,10 @@ class InterviewContextPreviewResponse(BaseModel):
 
     retrieved_knowledge: list[
         RetrievedKnowledgeItem
+    ]
+
+    retrieved_knowledge_units: list[
+        RetrievedKnowledgeUnitItem
     ]
 
     retrieved_evidence: list[

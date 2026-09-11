@@ -22,11 +22,20 @@ KnowledgeType = Literal[
 ]
 
 
+class KnowledgeReviewEvidenceItem(BaseModel):
+    source_type: str
+    source_id: uuid.UUID
+    source_text: str
+    confidence_score: float | None = None
+
+
 class KnowledgeReviewCandidateItem(BaseModel):
     candidate_id: uuid.UUID
     analysis_id: uuid.UUID
     interview_id: uuid.UUID
     source_message_id: uuid.UUID
+
+    evidence: KnowledgeReviewEvidenceItem | None = None
 
     statement: str
     knowledge_type: str

@@ -8,6 +8,7 @@ from app.models.interview_analysis import (
     InterviewAnalysis,
     KnowledgeCandidate,
 )
+from app.models.interview_message import InterviewMessage
 from app.models.knowledge_core import KnowledgeUnit
 from app.models.knowledge_synthesis import KnowledgeSynthesis
 from app.schemas.knowledge_review import (
@@ -15,6 +16,7 @@ from app.schemas.knowledge_review import (
     KnowledgeCandidateEditResponse,
     KnowledgeReviewCandidateItem,
     KnowledgeReviewCandidateListResponse,
+    KnowledgeReviewEvidenceItem,
 )
 from app.services.mission_service import get_mission
 
@@ -336,6 +338,32 @@ def get_mission_review_candidates(
         for candidate, _ in rows
     ]
 
+    source_message_ids = list(
+        {
+            analysis.source_message_id
+            for _, analysis in rows
+            if analysis.source_message_id is not None
+        }
+    )
+
+    source_message_rows = []
+
+    if source_message_ids:
+        source_message_rows = (
+            db.query(InterviewMessage)
+            .filter(
+                InterviewMessage.message_id.in_(
+                    source_message_ids
+                )
+            )
+            .all()
+        )
+
+    source_message_by_id = {
+        message.message_id: message
+        for message in source_message_rows
+    }
+
     synthesis_rows = (
         db.query(KnowledgeSynthesis)
         .filter(
@@ -388,17 +416,27 @@ def get_mission_review_candidates(
             ):
                 synthesis = None
 
-        # Low-confidence REVIEW_REQUIRED는 Auto Sync 시점에
-        # 아직 Synthesis가 없을 수 있다.
-        #
-        # Edit 직후에는 이전 PENDING Synthesis가 STALE이므로
-        # Review 화면에 노출하지 않는다. 이후 재-Synthesize가
-        # 수행되면 가장 최근 PENDING/APPROVED Synthesis를 노출한다.
         if synthesis is None:
             synthesis = (
                 latest_active_synthesis_by_candidate.get(
                     candidate.candidate_id
                 )
+            )
+
+        source_message = source_message_by_id.get(
+            analysis.source_message_id
+        )
+
+        evidence = None
+
+        if source_message is not None:
+            evidence = KnowledgeReviewEvidenceItem(
+                source_type="INTERVIEW_MESSAGE",
+                source_id=source_message.message_id,
+                source_text=source_message.content,
+                confidence_score=_float_or_none(
+                    candidate.confidence_score
+                ),
             )
 
         items.append(
@@ -409,6 +447,7 @@ def get_mission_review_candidates(
                 source_message_id=(
                     analysis.source_message_id
                 ),
+                evidence=evidence,
                 statement=candidate.statement,
                 knowledge_type=candidate.knowledge_type,
                 context=candidate.context or {},
