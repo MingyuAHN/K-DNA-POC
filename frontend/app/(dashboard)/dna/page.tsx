@@ -8,22 +8,25 @@ import {
   useState,
 } from "react";
 
-import {
-  useSearchParams,
-} from "next/navigation";
+import { useSearchParams } from "next/navigation";
+
+import ELK from "elkjs/lib/elk.bundled.js";
 
 import {
   Background,
   BaseEdge,
   Controls,
   EdgeLabelRenderer,
+  Handle,
   MarkerType,
   MiniMap,
   Position,
   ReactFlow,
+  getSmoothStepPath,
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeProps,
 } from "@xyflow/react";
 
 import "@xyflow/react/dist/style.css";
@@ -51,23 +54,36 @@ import {
 
 
 /* ============================================================
+   ELK
+============================================================ */
+
+const elk = new ELK();
+
+const NODE_WIDTH = 280;
+const NODE_HEIGHT = 170;
+
+
+/* ============================================================
    React Flow Node 타입
 ============================================================ */
 
-type FlowKnowledgeNode = Node<{
+type KnowledgeNodeData = {
   knowledge: KnowledgeGraphNode;
-  label: React.ReactNode;
-}>;
+  incomingEdgeIds: string[];
+  outgoingEdgeIds: string[];
+};
+
+type FlowKnowledgeNode = Node<
+  KnowledgeNodeData,
+  "knowledgeNode"
+>;
 
 
 /* ============================================================
    Knowledge Type 스타일
 ============================================================ */
 
-const knowledgeTypeStyleMap: Record<
-  string,
-  string
-> = {
+const knowledgeTypeStyleMap: Record<string, string> = {
   FACT:
     "border-slate-200 bg-slate-50 text-slate-700",
 
@@ -98,10 +114,7 @@ const knowledgeTypeStyleMap: Record<
    Relation 스타일
 ============================================================ */
 
-const relationStyleMap: Record<
-  string,
-  string
-> = {
+const relationStyleMap: Record<string, string> = {
   SUPPORTS:
     "bg-blue-100 text-blue-700",
 
@@ -126,24 +139,34 @@ const relationStyleMap: Record<
 
 
 /* ============================================================
-   Graph 노드 자동 배치
+   Relation 색상
 ============================================================ */
 
-function createNodePosition(
-  index: number,
-  total: number
+function getRelationColor(
+  relationType: string
 ) {
-  const columns =
-    total <= 3
-      ? Math.max(total, 1)
-      : Math.ceil(Math.sqrt(total));
+  switch (relationType) {
+    case "REFINES":
+      return "#7C3AED";
 
-  return {
-    x: (index % columns) * 420,
-    y:
-      Math.floor(index / columns) *
-      230,
-  };
+    case "SUPERSEDES":
+      return "#94A3B8";
+
+    case "HAS_EXCEPTION":
+      return "#D97706";
+
+    case "SUPPORTS":
+      return "#2563EB";
+
+    case "CONTRADICTS":
+      return "#E11D48";
+
+    case "CONTEXT_DIFFERS":
+      return "#0891B2";
+
+    default:
+      return "#64748B";
+  }
 }
 
 
@@ -208,9 +231,7 @@ function KnowledgeGraphCard({
   selected: boolean;
 }) {
   const typeStyle =
-    knowledgeTypeStyleMap[
-      node.knowledge_type
-    ] ??
+    knowledgeTypeStyleMap[node.knowledge_type] ??
     "border-slate-200 bg-slate-50 text-slate-600";
 
   const isSuperseded =
@@ -219,7 +240,8 @@ function KnowledgeGraphCard({
   return (
     <div
       className={`
-        w-[280px] rounded-2xl border p-4 text-left
+        flex h-[170px] w-[280px] flex-col
+        rounded-2xl border p-4 text-left
         transition-all duration-200
         ${
           isSuperseded
@@ -233,7 +255,7 @@ function KnowledgeGraphCard({
         }
       `}
     >
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
         <span
           className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${typeStyle}`}
         >
@@ -263,7 +285,7 @@ function KnowledgeGraphCard({
         {node.statement}
       </p>
 
-      <div className="mt-4 flex items-center justify-between gap-2">
+      <div className="mt-auto flex shrink-0 items-center justify-between gap-2 pt-3">
         <span
           className={`text-[10px] font-black ${
             isSuperseded
@@ -284,61 +306,233 @@ function KnowledgeGraphCard({
 
 
 /* ============================================================
+   Custom Knowledge Node
+
+   Relation별 별도 Handle 생성
+============================================================ */
+
+function KnowledgeFlowNode({
+  data,
+  selected,
+}: NodeProps<FlowKnowledgeNode>) {
+  const {
+    knowledge,
+    incomingEdgeIds,
+    outgoingEdgeIds,
+  } = data;
+
+  return (
+    <div className="relative">
+      {/* Incoming */}
+      {incomingEdgeIds.map(
+        (edgeId, index) => {
+          const top =
+            ((index + 1) /
+              (incomingEdgeIds.length + 1)) *
+            100;
+
+          return (
+            <Handle
+              key={`target-${edgeId}`}
+              id={`target-${edgeId}`}
+              type="target"
+              position={Position.Left}
+              style={{
+                top: `${top}%`,
+                width: 9,
+                height: 9,
+                background: "#FFFFFF",
+                border: "2px solid #94A3B8",
+                zIndex: 20,
+              }}
+            />
+          );
+        }
+      )}
+
+      <KnowledgeGraphCard
+        node={knowledge}
+        selected={selected}
+      />
+
+      {/* Outgoing */}
+      {outgoingEdgeIds.map(
+        (edgeId, index) => {
+          const top =
+            ((index + 1) /
+              (outgoingEdgeIds.length + 1)) *
+            100;
+
+          return (
+            <Handle
+              key={`source-${edgeId}`}
+              id={`source-${edgeId}`}
+              type="source"
+              position={Position.Right}
+              style={{
+                top: `${top}%`,
+                width: 9,
+                height: 9,
+                background: "#FFFFFF",
+                border: "2px solid #64748B",
+                zIndex: 20,
+              }}
+            />
+          );
+        }
+      )}
+    </div>
+  );
+}
+
+
+/* ============================================================
    Custom Relation Edge
 
-   - REFINES: 보라색 직선
-   - SUPERSEDES: 회색 점선 곡선
+   - 동일 source → target 복수 관계 분리
+   - 역방향 관계는 위쪽 corridor로 우회
+   - Relation Label은 해당 선 위에 표시
 ============================================================ */
 
 function KnowledgeRelationEdge({
   id,
   sourceX,
   sourceY,
+  sourcePosition,
   targetX,
   targetY,
+  targetPosition,
   markerEnd,
   data,
 }: EdgeProps) {
-  const relationType = String(
-    (
-      data as {
-        relationType?: string;
-      } | undefined
-    )?.relationType ?? ""
-  );
+  const edgeData =
+    data as
+      | {
+          relationType?: string;
+          parallelIndex?: number;
+          parallelCount?: number;
+        }
+      | undefined;
+
+  const relationType =
+    edgeData?.relationType ?? "";
+
+  const parallelIndex =
+    edgeData?.parallelIndex ?? 0;
+
+  const parallelCount =
+    edgeData?.parallelCount ?? 1;
+
+  const color =
+    getRelationColor(
+      relationType
+    );
 
   const isSupersedes =
     relationType === "SUPERSEDES";
 
-  const isRefines =
-    relationType === "REFINES";
+  /*
+   * 동일 source → target 간 여러 관계가 있을 때
+   * 중앙을 기준으로 서로 다른 lane을 사용
+   */
+  const lane =
+    parallelIndex -
+    (parallelCount - 1) / 2;
 
-  const middleX =
-    (sourceX + targetX) / 2;
+  const laneOffset =
+    lane * 60;
 
-  const middleY =
-    (sourceY + targetY) / 2;
+  /*
+   * ELK 배치에서 Source가 Target보다 오른쪽에 있으면
+   * 역방향 관계로 판단
+   */
+  const isReverse =
+    sourceX > targetX;
 
-  const edgePath =
-    isSupersedes
-      ? `M ${sourceX} ${sourceY}
-         C ${sourceX + 80} ${sourceY + 55},
-           ${targetX - 80} ${targetY + 55},
-           ${targetX} ${targetY}`
-      : `M ${sourceX} ${sourceY}
-         L ${targetX} ${targetY}`;
+  let edgePath = "";
+  let labelX = 0;
+  let labelY = 0;
 
-  const stroke =
-    isRefines
-      ? "#7C3AED"
-      : isSupersedes
-        ? "#94A3B8"
-        : "#CBD5E1";
 
-  const labelY =
-    isSupersedes
-      ? middleY + 42
-      : middleY - 22;
+  /* ==========================================================
+     역방향 Edge
+
+     일반 선들과 섞이지 않도록 위쪽으로 우회
+  ========================================================== */
+
+  if (isReverse) {
+    const sourceExitX =
+      sourceX + 42;
+
+    const targetEntryX =
+      targetX - 42;
+
+    const corridorY =
+      Math.min(
+        sourceY,
+        targetY
+      ) -
+      120 -
+      Math.abs(laneOffset);
+
+    edgePath = `
+      M ${sourceX} ${sourceY}
+      L ${sourceExitX} ${sourceY}
+      L ${sourceExitX} ${corridorY}
+      L ${targetEntryX} ${corridorY}
+      L ${targetEntryX} ${targetY}
+      L ${targetX} ${targetY}
+    `;
+
+    labelX =
+      (sourceExitX +
+        targetEntryX) /
+      2;
+
+    labelY =
+      corridorY;
+  }
+
+
+  /* ==========================================================
+     정상 좌 → 우 Edge
+  ========================================================== */
+
+  else {
+    const centerX =
+      (sourceX + targetX) /
+        2 +
+      laneOffset;
+
+    const [
+      normalPath,
+      normalLabelX,
+      normalLabelY,
+    ] = getSmoothStepPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
+
+      centerX,
+
+      borderRadius: 12,
+      offset: 30,
+    });
+
+    edgePath =
+      normalPath;
+
+    labelX =
+      normalLabelX;
+
+    labelY =
+      normalLabelY +
+      lane * 22;
+  }
+
 
   return (
     <>
@@ -347,12 +541,23 @@ function KnowledgeRelationEdge({
         path={edgePath}
         markerEnd={markerEnd}
         style={{
-          stroke,
-          strokeWidth: 2.4,
+          stroke: color,
+
+          strokeWidth:
+            relationType ===
+            "REFINES"
+              ? 2.2
+              : 1.8,
+
           strokeDasharray:
             isSupersedes
               ? "7 5"
               : undefined,
+
+          opacity:
+            isSupersedes
+              ? 0.76
+              : 0.92,
         }}
       />
 
@@ -361,27 +566,39 @@ function KnowledgeRelationEdge({
           className={`
             pointer-events-none
             absolute
-            rounded-lg
+            whitespace-nowrap
+            rounded-md
             border
             bg-white
-            px-2.5
+            px-2
             py-1
-            text-[10px]
+            text-[9px]
             font-black
-            shadow-sm
+            shadow-[0_2px_8px_rgba(15,23,42,0.10)]
+
             ${
-              isRefines
+              relationType === "REFINES"
                 ? "border-violet-200 text-violet-700"
-                : "border-slate-200 text-slate-600"
+                : relationType === "SUPERSEDES"
+                  ? "border-slate-200 text-slate-600"
+                  : relationType === "HAS_EXCEPTION"
+                    ? "border-amber-200 text-amber-700"
+                    : relationType === "SUPPORTS"
+                      ? "border-blue-200 text-blue-700"
+                      : relationType === "CONTRADICTS"
+                        ? "border-rose-200 text-rose-700"
+                        : relationType === "CONTEXT_DIFFERS"
+                          ? "border-cyan-200 text-cyan-700"
+                          : "border-slate-200 text-slate-600"
             }
           `}
           style={{
-            zIndex: 1000,
+            zIndex: 30,
 
             transform: `
               translate(-50%, -50%)
               translate(
-                ${middleX}px,
+                ${labelX}px,
                 ${labelY}px
               )
             `,
@@ -395,7 +612,15 @@ function KnowledgeRelationEdge({
 }
 
 
-/* Custom Edge 등록 */
+/* ============================================================
+   Custom Node / Edge 등록
+============================================================ */
+
+const nodeTypes = {
+  knowledgeNode:
+    KnowledgeFlowNode,
+};
+
 const edgeTypes = {
   knowledgeRelation:
     KnowledgeRelationEdge,
@@ -403,19 +628,163 @@ const edgeTypes = {
 
 
 /* ============================================================
-   DNA 실제 화면
+   ELK Layout
 
-   useSearchParams는 이 컴포넌트 안에서 사용하고
-   바깥 Page에서 Suspense로 감싼다.
+   Graph 관계 기준 좌 → 우 계층형 배치
+============================================================ */
+
+async function createElkLayout(
+  graph: KnowledgeGraphResponse,
+  selectedNodeId: string | null
+): Promise<FlowKnowledgeNode[]> {
+  const children =
+    graph.nodes.map((node) => ({
+      id: node.knowledge_id,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+    }));
+
+  const edges =
+    graph.edges.map((edge) => ({
+      id: edge.relation_id,
+
+      sources: [
+        edge.source,
+      ],
+
+      targets: [
+        edge.target,
+      ],
+    }));
+
+  const elkGraph = {
+    id: "knowledge-dna-root",
+
+    layoutOptions: {
+      "elk.algorithm":
+        "layered",
+
+      "elk.direction":
+        "RIGHT",
+
+      "elk.edgeRouting":
+        "ORTHOGONAL",
+
+      "elk.layered.spacing.nodeNodeBetweenLayers":
+        "230",
+
+      "elk.spacing.nodeNode":
+        "120",
+
+      "elk.spacing.edgeNode":
+        "85",
+
+      "elk.spacing.edgeEdge":
+        "55",
+
+      "elk.layered.spacing.edgeNodeBetweenLayers":
+        "80",
+
+      "elk.layered.spacing.edgeEdgeBetweenLayers":
+        "45",
+
+      "elk.layered.nodePlacement.strategy":
+        "NETWORK_SIMPLEX",
+
+      "elk.layered.crossingMinimization.strategy":
+        "LAYER_SWEEP",
+
+      "elk.layered.considerModelOrder.strategy":
+        "NODES_AND_EDGES",
+    },
+
+    children,
+    edges,
+  };
+
+  const result =
+    await elk.layout(
+      elkGraph
+    );
+
+  return graph.nodes.map(
+    (node) => {
+      const layoutNode =
+        result.children?.find(
+          (item) =>
+            item.id ===
+            node.knowledge_id
+        );
+
+      const incomingEdgeIds =
+        graph.edges
+          .filter(
+            (edge) =>
+              edge.target ===
+              node.knowledge_id
+          )
+          .map(
+            (edge) =>
+              edge.relation_id
+          );
+
+      const outgoingEdgeIds =
+        graph.edges
+          .filter(
+            (edge) =>
+              edge.source ===
+              node.knowledge_id
+          )
+          .map(
+            (edge) =>
+              edge.relation_id
+          );
+
+      return {
+        id:
+          node.knowledge_id,
+
+        type:
+          "knowledgeNode",
+
+        position: {
+          x:
+            layoutNode?.x ?? 0,
+
+          y:
+            layoutNode?.y ?? 0,
+        },
+
+        selected:
+          selectedNodeId ===
+          node.knowledge_id,
+
+        data: {
+          knowledge:
+            node,
+
+          incomingEdgeIds,
+
+          outgoingEdgeIds,
+        },
+      };
+    }
+  );
+}
+
+
+/* ============================================================
+   DNA 실제 화면
 ============================================================ */
 
 function DnaPageContent() {
-  /* Mission 페이지에서 전달된 Mission ID */
   const searchParams =
     useSearchParams();
 
   const missionId =
-    searchParams.get("missionId");
+    searchParams.get(
+      "missionId"
+    );
 
   const [mission, setMission] =
     useState<MissionResponse | null>(
@@ -430,81 +799,116 @@ function DnaPageContent() {
   const [
     selectedNodeId,
     setSelectedNodeId,
-  ] = useState<string | null>(null);
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    flowNodes,
+    setFlowNodes,
+  ] = useState<
+    FlowKnowledgeNode[]
+  >([]);
 
   const [loading, setLoading] =
     useState(true);
 
   const [error, setError] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null
+    );
 
 
   /* ==========================================================
      Mission + Graph 조회
   ========================================================== */
 
-  const loadData = useCallback(
-    async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  const loadData =
+    useCallback(
+      async () => {
+        try {
+          setLoading(true);
+          setError(null);
 
-        if (!missionId) {
-          setMission(null);
-          setGraph(null);
-          setSelectedNodeId(null);
+          if (!missionId) {
+            setMission(null);
+            setGraph(null);
+            setFlowNodes([]);
+            setSelectedNodeId(
+              null
+            );
 
-          setError(
-            "Mission ID가 전달되지 않았습니다."
+            setError(
+              "Mission ID가 전달되지 않았습니다."
+            );
+
+            return;
+          }
+
+          const [
+            missionResult,
+            graphResult,
+          ] = await Promise.all([
+            getMission(
+              missionId
+            ),
+
+            getKnowledgeGraph(
+              missionId
+            ),
+          ]);
+
+          setMission(
+            missionResult
           );
 
-          return;
-        }
-
-        const [
-          missionResult,
-          graphResult,
-        ] = await Promise.all([
-          getMission(missionId),
-          getKnowledgeGraph(
-            missionId
-          ),
-        ]);
-
-        setMission(missionResult);
-        setGraph(graphResult);
-        
-        // 최신 Graph 조회 완료 후 해당 Mission의 갱신 플래그 제거
-        sessionStorage.removeItem(
-          `knowledge-graph-dirty:${missionId}`
-        );
-
-        /* VERIFIED 노드 우선 선택 */
-        const firstVerified =
-          graphResult.nodes.find(
-            (node) =>
-              node.status ===
-              "VERIFIED"
+          setGraph(
+            graphResult
           );
 
-        setSelectedNodeId(
-          firstVerified?.knowledge_id ??
+          sessionStorage.removeItem(
+            `knowledge-graph-dirty:${missionId}`
+          );
+
+          const firstVerified =
+            graphResult.nodes.find(
+              (node) =>
+                node.status ===
+                "VERIFIED"
+            );
+
+          const initialNodeId =
+            firstVerified
+              ?.knowledge_id ??
             graphResult.nodes[0]
               ?.knowledge_id ??
-            null
-        );
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Knowledge Graph 조회 중 오류가 발생했습니다."
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [missionId]
-  );
+            null;
+
+          setSelectedNodeId(
+            initialNodeId
+          );
+
+          const layoutNodes =
+            await createElkLayout(
+              graphResult,
+              initialNodeId
+            );
+
+          setFlowNodes(
+            layoutNodes
+          );
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Knowledge Graph 조회 중 오류가 발생했습니다."
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+      [missionId]
+    );
 
 
   useEffect(() => {
@@ -513,18 +917,42 @@ function DnaPageContent() {
 
 
   /* ==========================================================
+     선택 상태 갱신
+  ========================================================== */
+
+  useEffect(() => {
+    setFlowNodes(
+      (current) =>
+        current.map(
+          (node) => ({
+            ...node,
+
+            selected:
+              node.id ===
+              selectedNodeId,
+          })
+        )
+    );
+  }, [selectedNodeId]);
+
+
+  /* ==========================================================
      선택 노드
   ========================================================== */
 
-  const selectedNode = useMemo(
-    () =>
-      graph?.nodes.find(
-        (node) =>
-          node.knowledge_id ===
-          selectedNodeId
-      ) ?? null,
-    [graph, selectedNodeId]
-  );
+  const selectedNode =
+    useMemo(
+      () =>
+        graph?.nodes.find(
+          (node) =>
+            node.knowledge_id ===
+            selectedNodeId
+        ) ?? null,
+      [
+        graph,
+        selectedNodeId,
+      ]
+    );
 
 
   /* ==========================================================
@@ -541,62 +969,6 @@ function DnaPageContent() {
             edge.target ===
               selectedNodeId
         ) ?? [],
-      [graph, selectedNodeId]
-    );
-
-
-  /* ==========================================================
-     React Flow Nodes
-  ========================================================== */
-
-  const flowNodes =
-    useMemo<FlowKnowledgeNode[]>(
-      () => {
-        if (!graph) {
-          return [];
-        }
-
-        return graph.nodes.map(
-          (node, index) => ({
-            id: node.knowledge_id,
-
-            position:
-              createNodePosition(
-                index,
-                graph.nodes.length
-              ),
-
-            sourcePosition:
-              Position.Right,
-
-            targetPosition:
-              Position.Left,
-
-            data: {
-              knowledge: node,
-
-              label: (
-                <KnowledgeGraphCard
-                  node={node}
-                  selected={
-                    selectedNodeId ===
-                    node.knowledge_id
-                  }
-                />
-              ),
-            },
-
-            style: {
-              padding: 0,
-              border: "none",
-              outline: "none",
-              boxShadow: "none",
-              background:
-                "transparent",
-            },
-          })
-        );
-      },
       [
         graph,
         selectedNodeId,
@@ -606,44 +978,112 @@ function DnaPageContent() {
 
   /* ==========================================================
      React Flow Edges
+
+     동일 Source → Target 관계를 그룹화해서
+     parallelIndex / parallelCount 전달
   ========================================================== */
 
-  const flowEdges = useMemo<Edge[]>(
-    () => {
-      if (!graph) {
-        return [];
-      }
+  const flowEdges =
+    useMemo<Edge[]>(
+      () => {
+        if (!graph) {
+          return [];
+        }
 
-      return graph.edges.map(
-        (edge) => ({
-          id: edge.relation_id,
+        const edgeGroups =
+          new Map<
+            string,
+            KnowledgeGraphEdge[]
+          >();
 
-          source: edge.source,
-          target: edge.target,
+        graph.edges.forEach(
+          (edge) => {
+            const groupKey =
+              `${edge.source}→${edge.target}`;
 
-          type:
-            "knowledgeRelation",
+            const current =
+              edgeGroups.get(
+                groupKey
+              ) ?? [];
 
-          markerEnd: {
-            type:
-              MarkerType.ArrowClosed,
+            current.push(
+              edge
+            );
 
-            color:
-              edge.relation_type ===
-              "REFINES"
-                ? "#7C3AED"
-                : "#94A3B8",
-          },
+            edgeGroups.set(
+              groupKey,
+              current
+            );
+          }
+        );
 
-          data: {
-            relationType:
-              edge.relation_type,
-          },
-        })
-      );
-    },
-    [graph]
-  );
+
+        return graph.edges.map(
+          (edge) => {
+            const color =
+              getRelationColor(
+                edge.relation_type
+              );
+
+            const groupKey =
+              `${edge.source}→${edge.target}`;
+
+            const group =
+              edgeGroups.get(
+                groupKey
+              ) ?? [edge];
+
+            const parallelIndex =
+              group.findIndex(
+                (item) =>
+                  item.relation_id ===
+                  edge.relation_id
+              );
+
+            return {
+              id:
+                edge.relation_id,
+
+              source:
+                edge.source,
+
+              target:
+                edge.target,
+
+              sourceHandle:
+                `source-${edge.relation_id}`,
+
+              targetHandle:
+                `target-${edge.relation_id}`,
+
+              type:
+                "knowledgeRelation",
+
+              markerEnd: {
+                type:
+                  MarkerType.ArrowClosed,
+
+                color,
+
+                width: 20,
+                height: 20,
+              },
+
+              data: {
+                relationType:
+                  edge.relation_type,
+
+                parallelIndex,
+
+                parallelCount:
+                  group.length,
+              },
+            };
+          }
+        );
+      },
+      [graph]
+    );
 
 
   /* ==========================================================
@@ -651,7 +1091,8 @@ function DnaPageContent() {
   ========================================================== */
 
   const getOtherNode = (
-    relation: KnowledgeGraphEdge
+    relation:
+      KnowledgeGraphEdge
   ) => {
     if (
       !graph ||
@@ -678,24 +1119,26 @@ function DnaPageContent() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
+
       <div className="mx-auto max-w-[1500px] space-y-5">
 
         {/* 화면 제목 */}
         <header className="px-1">
+
           <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
             Knowledge DNA
           </h1>
 
           <p className="mt-1 text-sm font-semibold text-slate-500">
-            검증된 지식 간의 관계와
-            버전 변화를 Knowledge
-            Graph로 확인합니다.
+            검증된 지식 간의 관계와 버전 변화를 Knowledge Graph로 확인합니다.
           </p>
+
         </header>
 
 
         {/* Mission */}
         <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
+
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
 
             <p className="shrink-0 text-xs font-black uppercase tracking-[0.14em] text-slate-400">
@@ -703,10 +1146,11 @@ function DnaPageContent() {
             </p>
 
             <div className="min-w-0 flex-1">
+
               <div className="flex h-11 items-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800">
-                {mission?.title ??
-                  "-"}
+                {mission?.title ?? "-"}
               </div>
+
             </div>
 
             <button
@@ -721,47 +1165,50 @@ function DnaPageContent() {
             </button>
 
           </div>
+
         </section>
 
 
         {/* Loading */}
         {loading && (
           <section className="rounded-[24px] border border-slate-200 bg-white p-10 text-center shadow-sm">
+
             <p className="text-sm font-semibold text-slate-400">
-              Knowledge Graph를
-              불러오는 중입니다.
+              Knowledge Graph를 불러오는 중입니다.
             </p>
+
           </section>
         )}
 
 
         {/* Error */}
-        {!loading && error && (
-          <section className="rounded-[24px] border border-rose-200 bg-rose-50 p-5 shadow-sm">
+        {!loading &&
+          error && (
+            <section className="rounded-[24px] border border-rose-200 bg-rose-50 p-5 shadow-sm">
 
-            <div className="flex items-center gap-3">
-              <TriangleAlert className="h-5 w-5 text-rose-500" />
+              <div className="flex items-center gap-3">
 
-              <p className="text-sm font-bold text-rose-700">
-                {error}
-              </p>
-            </div>
+                <TriangleAlert className="h-5 w-5 text-rose-500" />
 
-          </section>
-        )}
+                <p className="text-sm font-bold text-rose-700">
+                  {error}
+                </p>
+
+              </div>
+
+            </section>
+          )}
 
 
         {/* Empty */}
         {!loading &&
           !error &&
           graph &&
-          graph.nodes.length ===
-            0 && (
+          graph.nodes.length === 0 && (
             <section className="rounded-[24px] border border-slate-200 bg-white p-10 text-center shadow-sm">
 
               <p className="text-sm font-semibold text-slate-400">
-                표시할 Knowledge
-                Unit이 없습니다.
+                표시할 Knowledge Unit이 없습니다.
               </p>
 
             </section>
@@ -771,8 +1218,7 @@ function DnaPageContent() {
         {!loading &&
           !error &&
           graph &&
-          graph.nodes.length >
-            0 && (
+          graph.nodes.length > 0 && (
             <>
               {/* Knowledge Graph */}
               <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
@@ -786,16 +1232,16 @@ function DnaPageContent() {
                     </div>
 
                     <div>
+
                       <h2 className="text-sm font-black text-slate-900">
                         Knowledge DNA Graph
                       </h2>
 
                       <p className="text-[11px] font-semibold text-slate-400">
-                        {graph.node_count}{" "}
-                        Nodes ·{" "}
-                        {graph.edge_count}{" "}
-                        Relations
+                        {graph.node_count} Nodes ·{" "}
+                        {graph.edge_count} Relations
                       </p>
+
                     </div>
 
                   </div>
@@ -809,15 +1255,17 @@ function DnaPageContent() {
                   <ReactFlow
                     nodes={flowNodes}
                     edges={flowEdges}
+                    nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
 
                     fitView
+
                     fitViewOptions={{
-                      padding: 0.3,
-                      maxZoom: 1.05,
+                      padding: 0.2,
+                      maxZoom: 1,
                     }}
 
-                    minZoom={0.4}
+                    minZoom={0.35}
                     maxZoom={1.5}
 
                     nodesFocusable={false}
@@ -831,6 +1279,7 @@ function DnaPageContent() {
                       )
                     }
                   >
+
                     <Background
                       gap={22}
                       size={1}
@@ -839,9 +1288,7 @@ function DnaPageContent() {
 
                     <Controls />
 
-                    {/* 노드가 많을 때만 MiniMap 표시 */}
-                    {graph.nodes.length >
-                      6 && (
+                    {graph.nodes.length > 6 && (
                       <MiniMap />
                     )}
 
@@ -850,7 +1297,7 @@ function DnaPageContent() {
                 </div>
 
 
-                {/* Graph Legend */}
+                {/* Legend */}
                 <div className="mt-4 flex flex-wrap gap-4 text-[11px] font-bold text-slate-500">
 
                   <Legend
@@ -873,18 +1320,29 @@ function DnaPageContent() {
                     label="SUPERSEDES"
                   />
 
+                  <Legend
+                    className="bg-amber-400"
+                    label="HAS_EXCEPTION"
+                  />
+
+                  <Legend
+                    className="bg-blue-500"
+                    label="SUPPORTS"
+                  />
+
                 </div>
 
               </section>
 
 
-              {/* 선택 노드 상세 + 관계 */}
+              {/* 상세 */}
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
 
                 {/* Selected Node */}
                 <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
 
                   <div className="mb-5">
+
                     <p className="text-[11px] font-black uppercase tracking-[0.14em] text-blue-500">
                       Selected Node
                     </p>
@@ -892,6 +1350,7 @@ function DnaPageContent() {
                     <h2 className="mt-1 text-xl font-black text-slate-900">
                       선택 노드 상세
                     </h2>
+
                   </div>
 
                   {selectedNode && (
@@ -915,6 +1374,7 @@ function DnaPageContent() {
                     </div>
 
                     <div>
+
                       <h2 className="text-sm font-black text-slate-900">
                         연결 관계
                       </h2>
@@ -922,13 +1382,13 @@ function DnaPageContent() {
                       <p className="text-[11px] font-semibold text-slate-400">
                         Knowledge Relations
                       </p>
+
                     </div>
 
                   </div>
 
 
-                  {selectedRelations.length >
-                  0 ? (
+                  {selectedRelations.length > 0 ? (
                     <div className="space-y-3">
 
                       {selectedRelations.map(
@@ -968,8 +1428,7 @@ function DnaPageContent() {
                     <div className="rounded-2xl bg-slate-50 p-5 text-center">
 
                       <p className="text-xs font-semibold text-slate-400">
-                        연결된 관계가
-                        없습니다.
+                        연결된 관계가 없습니다.
                       </p>
 
                     </div>
@@ -989,9 +1448,6 @@ function DnaPageContent() {
 
 /* ============================================================
    Page
-
-   Vercel Production Build에서 useSearchParams를 사용하기 위해
-   실제 화면을 Suspense Boundary로 감싼다.
 ============================================================ */
 
 export default function DnaPage() {
@@ -999,13 +1455,19 @@ export default function DnaPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
+
           <div className="mx-auto max-w-[1500px]">
+
             <section className="rounded-[24px] border border-slate-200 bg-white p-10 text-center shadow-sm">
+
               <p className="text-sm font-semibold text-slate-400">
                 Knowledge DNA를 불러오는 중입니다.
               </p>
+
             </section>
+
           </div>
+
         </div>
       }
     >
@@ -1092,7 +1554,9 @@ function KnowledgeDetail({
       <DetailCard
         title="추출 지식"
         subtitle="Statement"
-        content={node.statement}
+        content={
+          node.statement
+        }
         highlight
       />
 
@@ -1110,7 +1574,9 @@ function KnowledgeDetail({
         <DetailCard
           title="상태"
           subtitle="Status"
-          content={node.status}
+          content={
+            node.status
+          }
         />
 
         <DetailCard
@@ -1130,10 +1596,8 @@ function KnowledgeDetail({
       </div>
 
 
-      {/* Version 정보 */}
       {(node.root_knowledge_id ||
         node.supersedes_id) && (
-
         <div className="grid gap-3 md:grid-cols-2">
 
           {node.root_knowledge_id && (
@@ -1165,7 +1629,7 @@ function KnowledgeDetail({
 
 
 /* ============================================================
-   연결 관계 카드
+   Relation Card
 ============================================================ */
 
 function RelationCard({
@@ -1173,8 +1637,12 @@ function RelationCard({
   otherNode,
   onClick,
 }: {
-  relation: KnowledgeGraphEdge;
-  otherNode: KnowledgeGraphNode;
+  relation:
+    KnowledgeGraphEdge;
+
+  otherNode:
+    KnowledgeGraphNode;
+
   onClick: () => void;
 }) {
   const style =
@@ -1204,9 +1672,7 @@ function RelationCard({
             <span
               className={`rounded-full px-2.5 py-1 text-[10px] font-black ${style}`}
             >
-              {
-                relation.relation_type
-              }
+              {relation.relation_type}
             </span>
 
             <span className="ml-auto text-[10px] font-black text-blue-600">
@@ -1237,7 +1703,7 @@ function RelationCard({
 
 
 /* ============================================================
-   상세 공통 카드
+   Detail Card
 ============================================================ */
 
 function DetailCard({
@@ -1269,6 +1735,7 @@ function DetailCard({
         )}
 
         <div>
+
           <p className="text-xs font-black text-slate-900">
             {title}
           </p>
@@ -1276,6 +1743,7 @@ function DetailCard({
           <p className="text-[10px] font-semibold text-slate-400">
             {subtitle}
           </p>
+
         </div>
 
       </div>
@@ -1291,7 +1759,7 @@ function DetailCard({
 
 
 /* ============================================================
-   Graph Legend
+   Legend
 ============================================================ */
 
 function Legend({
