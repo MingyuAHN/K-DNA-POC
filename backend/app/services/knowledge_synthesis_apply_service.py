@@ -126,6 +126,247 @@ def _mark_synthesis_stale_for_target_change(
     db.refresh(candidate)
 
 
+
+def _datetime_timestamp(
+    value: datetime | None,
+) -> float | None:
+    if value is None:
+        return None
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+
+    return value.timestamp()
+
+
+def _find_newer_applied_sibling_synthesis(
+    db: Session,
+    candidate: KnowledgeCandidate,
+    synthesis: KnowledgeSynthesis,
+) -> KnowledgeSynthesis | None:
+    """
+    현재 Synthesis가 생성된 뒤 같은 InterviewAnalysis의 다른 Candidate가
+    먼저 APPROVE/APPLIED 되었는지 확인한다.
+
+    post-apply sibling invalidation이 배포되기 전에 만들어진 기존 대기건,
+    혹은 동시에 진행된 Review처럼 STALE 플래그가 아직 반영되지 않은
+    경우에도 APPROVE 직전 한 번 더 graph snapshot freshness를 검증한다.
+    """
+
+    sibling_candidates = (
+        db.query(KnowledgeCandidate)
+        .filter(
+            KnowledgeCandidate.analysis_id
+            == candidate.analysis_id,
+            KnowledgeCandidate.candidate_id
+            != candidate.candidate_id,
+        )
+        .all()
+    )
+
+    if not sibling_candidates:
+        return None
+
+    sibling_candidate_ids = [
+        row.candidate_id
+        for row in sibling_candidates
+    ]
+
+    applied_syntheses = (
+        db.query(KnowledgeSynthesis)
+        .filter(
+            KnowledgeSynthesis.candidate_id.in_(
+                sibling_candidate_ids
+            ),
+            KnowledgeSynthesis.synthesis_id
+            != synthesis.synthesis_id,
+            KnowledgeSynthesis.status
+            == "APPLIED",
+        )
+        .all()
+    )
+
+    synthesis_created_at = _datetime_timestamp(
+        synthesis.created_at
+    )
+
+    newer_rows: list[tuple[float, KnowledgeSynthesis]] = []
+
+    for applied in applied_syntheses:
+        applied_at = _datetime_timestamp(
+            applied.applied_at
+        )
+
+        if applied_at is None:
+            continue
+
+        if (
+            synthesis_created_at is not None
+            and applied_at <= synthesis_created_at
+        ):
+            continue
+
+        newer_rows.append(
+            (
+                applied_at,
+                applied,
+            )
+        )
+
+    if not newer_rows:
+        return None
+
+    newer_rows.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    return newer_rows[0][1]
+
+def _mark_synthesis_stale_for_graph_change(
+    synthesis: KnowledgeSynthesis,
+    candidate: KnowledgeCandidate,
+    applied_synthesis_id: uuid.UUID,
+    validated_by: str | None,
+    now: datetime,
+) -> None:
+    """
+    같은 InterviewAnalysis에서 다른 Candidate가 먼저 승인되어
+    Knowledge Graph가 변경된 경우, 아직 대기 중인 Synthesis는
+    생성 당시의 graph snapshot에 기반하므로 그대로 적용하지 않는다.
+
+    특히 target/existing_knowledge가 없었던 MERGE도 graph가 비어 있던
+    시점에 만들어졌다면 이후 첫 Knowledge가 승인된 순간 판단 전제가
+    달라진다. 따라서 PENDING/APPROVED Synthesis를 STALE 처리하고
+    Candidate는 REVIEW_REQUIRED 상태로 유지한 채 재-Synthesis를 요구한다.
+
+    이 함수는 transaction을 commit하지 않는다. 현재 APPROVE와 sibling
+    invalidation이 하나의 transaction으로 함께 성공/rollback되게 한다.
+    """
+
+    if synthesis.status not in {
+        "PENDING",
+        "APPROVED",
+    }:
+        return
+
+    synthesis.status = "STALE"
+    synthesis.validated_by = (
+        validated_by
+        or "K-DNA ANALYSIS SNAPSHOT GUARD"
+    )
+    synthesis.validation_reason = (
+        "Knowledge graph changed after synthesis creation because "
+        "another candidate from the same interview analysis was "
+        "approved; re-synthesis is required. "
+        f"applied_synthesis_id={applied_synthesis_id}"
+    )
+    synthesis.validated_at = now
+
+    if candidate.review_status == "REVIEW_REQUIRED":
+        if (
+            candidate.review_synthesis_id is None
+            or str(candidate.review_synthesis_id)
+            == str(synthesis.synthesis_id)
+        ):
+            candidate.review_synthesis_id = None
+
+        candidate.review_reason = (
+            "Knowledge graph changed while this candidate was "
+            "waiting for review; re-synthesis is required"
+        )
+
+
+def _mark_waiting_syntheses_stale_after_graph_change(
+    db: Session,
+    analysis_id: uuid.UUID,
+    applied_candidate_id: uuid.UUID,
+    applied_synthesis_id: uuid.UUID,
+    validated_by: str | None,
+    now: datetime,
+) -> int:
+    """
+    현재 승인으로 Knowledge Graph가 실제 변경된 뒤,
+    같은 analysis에서 먼저 만들어져 대기 중인 다른 Candidate의
+    PENDING/APPROVED Synthesis를 모두 STALE 처리한다.
+
+    같은 답변에서 여러 Candidate가 동시에 Synthesis되었더라도
+    Human Review 승인 순서대로 최신 Graph를 다시 반영하게 하여
+    targetless MERGE, 오래된 target, 누락 relation을 방지한다.
+    """
+
+    sibling_candidates = (
+        db.query(KnowledgeCandidate)
+        .filter(
+            KnowledgeCandidate.analysis_id
+            == analysis_id,
+            KnowledgeCandidate.candidate_id
+            != applied_candidate_id,
+        )
+        .all()
+    )
+
+    if not sibling_candidates:
+        return 0
+
+    candidate_map = {
+        row.candidate_id: row
+        for row in sibling_candidates
+    }
+    sibling_candidate_ids = list(candidate_map.keys())
+
+    waiting_syntheses = (
+        db.query(KnowledgeSynthesis)
+        .filter(
+            KnowledgeSynthesis.candidate_id.in_(
+                sibling_candidate_ids
+            ),
+            KnowledgeSynthesis.synthesis_id
+            != applied_synthesis_id,
+            KnowledgeSynthesis.status.in_(
+                ("PENDING", "APPROVED")
+            ),
+        )
+        .all()
+    )
+
+    stale_count = 0
+
+    for waiting_synthesis in waiting_syntheses:
+        sibling_candidate = candidate_map.get(
+            waiting_synthesis.candidate_id
+        )
+
+        if sibling_candidate is None:
+            continue
+
+        _mark_synthesis_stale_for_graph_change(
+            synthesis=waiting_synthesis,
+            candidate=sibling_candidate,
+            applied_synthesis_id=applied_synthesis_id,
+            validated_by=validated_by,
+            now=now,
+        )
+        stale_count += 1
+
+    if stale_count:
+        db.flush()
+
+        logger.info(
+            (
+                "Marked %s waiting sibling syntheses STALE after "
+                "knowledge graph change analysis_id=%s "
+                "applied_candidate_id=%s applied_synthesis_id=%s"
+            ),
+            stale_count,
+            analysis_id,
+            applied_candidate_id,
+            applied_synthesis_id,
+        )
+
+    return stale_count
+
+
 def _get_targets(
     db: Session,
     synthesis: KnowledgeSynthesis,
@@ -455,6 +696,51 @@ def validate_and_apply_synthesis(
     )
 
     now = _utcnow()
+
+    # ------------------------------------------------------
+    # Same-analysis pre-approve graph-snapshot freshness guard
+    #
+    # 현재 Synthesis가 만들어진 뒤 같은 Analysis의 다른 Candidate가
+    # 먼저 승인되어 Knowledge Graph를 변경했다면 이 Synthesis의
+    # existing_knowledge/target 판단은 이미 오래된 snapshot이다.
+    #
+    # 특히 기존 Graph가 비어 있을 때 생성된 targetless MERGE가
+    # 첫 Candidate 승인 후에도 PENDING으로 남아 있던 경우를 여기서
+    # 확실히 차단한다.
+    # ------------------------------------------------------
+    if request.decision == "APPROVE":
+        newer_applied_sibling = (
+            _find_newer_applied_sibling_synthesis(
+                db=db,
+                candidate=candidate,
+                synthesis=synthesis,
+            )
+        )
+
+        if newer_applied_sibling is not None:
+            _mark_synthesis_stale_for_graph_change(
+                synthesis=synthesis,
+                candidate=candidate,
+                applied_synthesis_id=(
+                    newer_applied_sibling.synthesis_id
+                ),
+                validated_by=request.validated_by,
+                now=now,
+            )
+
+            db.commit()
+            db.refresh(synthesis)
+            db.refresh(candidate)
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Knowledge synthesis is stale because another "
+                    "candidate from the same interview analysis was "
+                    "approved after this synthesis was created; "
+                    "create a new synthesis before validation"
+                ),
+            )
 
     # ------------------------------------------------------
     # Review Edit stale-synthesis guard
@@ -1078,6 +1364,33 @@ def validate_and_apply_synthesis(
             str(value)
             for value in resulting_ids
         ]
+
+        # --------------------------------------------------
+        # Same-analysis graph-snapshot stale guard
+        #
+        # 이 APPROVE가 새 Knowledge Unit/Version을 실제 생성한 경우
+        # 같은 analysis에서 먼저 생성되어 대기 중이던 다른 Synthesis는
+        # 현재 Graph를 반영하지 못한 snapshot이다.
+        #
+        # target이 있었던 ENRICH뿐 아니라, Graph가 비어 있을 때 만들어진
+        # targetless MERGE도 포함하여 모두 STALE 처리한다.
+        # 다음 Review에서는 반드시 재-Synthesis하여 최신 VERIFIED
+        # Knowledge와 Relation을 다시 판단하게 한다.
+        #
+        # No-op reuse는 위에서 early return하므로 이 경로에 도달하지 않는다.
+        # --------------------------------------------------
+        if (
+            analysis is not None
+            and resulting_ids
+        ):
+            _mark_waiting_syntheses_stale_after_graph_change(
+                db=db,
+                analysis_id=analysis.analysis_id,
+                applied_candidate_id=candidate.candidate_id,
+                applied_synthesis_id=synthesis.synthesis_id,
+                validated_by=request.validated_by,
+                now=now,
+            )
 
         db.commit()
         db.refresh(synthesis)

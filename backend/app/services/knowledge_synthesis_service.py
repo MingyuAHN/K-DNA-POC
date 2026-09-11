@@ -25,19 +25,32 @@ from app.models.knowledge_synthesis import (
 from app.schemas.knowledge_synthesis import (
     ExistingKnowledge,
     KnowledgeSynthesisAIRequest,
+    KnowledgeSynthesisAIResponse,
     KnowledgeSynthesisRequest,
     KnowledgeSynthesisResponse,
+    ProposedSynthesisRelation,
     StoredSynthesizedKnowledgeUnit,
     StoredSynthesisRelation,
     SynthesisCandidate,
     SynthesisContext,
     SynthesisDecisionRule,
+    SynthesizedKnowledgeUnit,
 )
 
 
 ACTIVE_KNOWLEDGE_STATUSES = {
     "VERIFIED",
     "EXPERT_OPINION",
+}
+
+EXCEPTION_PARENT_TYPES = {
+    "PRINCIPLE",
+    "DECISION_RULE",
+}
+
+EXCEPTION_PRESERVATION_SKIP_OPERATIONS = {
+    "KEEP_CONFLICT",
+    "SPLIT_BY_CONTEXT",
 }
 
 
@@ -115,6 +128,207 @@ def _knowledge_to_ai(
         ),
         validation_status=knowledge.status,
     )
+
+
+def _candidate_to_exception_unit(
+    candidate: KnowledgeCandidate,
+) -> SynthesizedKnowledgeUnit:
+    """
+    EXCEPTION Candidate를 기존 PRINCIPLE/DECISION_RULE 안에 흡수하지
+    않고 독립 Knowledge Unit으로 보존하기 위한 synthesized unit.
+
+    Candidate의 원래 의미와 provenance를 최대한 그대로 유지한다.
+    """
+
+    decision_rule = None
+
+    if candidate.decision_rule:
+        decision_rule = (
+            SynthesisDecisionRule
+            .model_validate(
+                candidate.decision_rule
+            )
+        )
+
+    return SynthesizedKnowledgeUnit(
+        statement=candidate.statement,
+        type="EXCEPTION",
+        context=(
+            SynthesisContext.model_validate(
+                candidate.context or {}
+            )
+        ),
+        decision_rule=decision_rule,
+        rationale=candidate.rationale,
+        exception=candidate.exception,
+        novelty_score=(
+            float(candidate.novelty_score)
+            if candidate.novelty_score
+            is not None
+            else 0.0
+        ),
+        confidence_score=(
+            float(candidate.confidence_score)
+            if candidate.confidence_score
+            is not None
+            else 0.0
+        ),
+        validation_status=(
+            candidate.validation_status
+        ),
+    )
+
+
+def _normalize_exception_synthesis(
+    candidate: KnowledgeCandidate,
+    related_knowledge: list[KnowledgeUnit],
+    ai_result: KnowledgeSynthesisAIResponse,
+) -> tuple[
+    KnowledgeSynthesisAIResponse,
+    str | None,
+]:
+    """
+    Backend EXCEPTION preservation policy.
+
+    EXCEPTION Candidate가 정확히 하나의 PRINCIPLE/DECISION_RULE과
+    연결되는 경우에는 AI가 ENRICH/SUPERSEDE/MERGE를 제안하더라도
+    기존 Rule의 새 Version 안으로 예외를 흡수하지 않는다.
+
+    대신:
+      - operation = ADD_EXCEPTION
+      - synthesized unit = 독립 EXCEPTION
+      - relation = parent --HAS_EXCEPTION--> exception
+
+    단, KEEP_CONFLICT / SPLIT_BY_CONTEXT는 실제 충돌/맥락 분리 의미를
+    보존해야 하므로 강제 정규화하지 않는다.
+
+    Target이 모호한 경우에도 Backend가 임의로 부모 Knowledge를
+    선택하지 않고 AI 결과를 그대로 둔다.
+    """
+
+    if candidate.knowledge_type != "EXCEPTION":
+        return (
+            ai_result,
+            None,
+        )
+
+    if (
+        ai_result.operation
+        in EXCEPTION_PRESERVATION_SKIP_OPERATIONS
+    ):
+        return (
+            ai_result,
+            None,
+        )
+
+    related_by_id = {
+        row.knowledge_id: row
+        for row in related_knowledge
+    }
+
+    target = None
+
+    # AI가 정확히 하나의 target을 명시한 경우 우선 사용한다.
+    if len(ai_result.target_knowledge_ids) == 1:
+        candidate_target = related_by_id.get(
+            ai_result.target_knowledge_ids[0]
+        )
+
+        if (
+            candidate_target is not None
+            and candidate_target.knowledge_type
+            in EXCEPTION_PARENT_TYPES
+        ):
+            target = candidate_target
+
+    # AI가 target을 비워 두었더라도 Backend가 전달한 관련 Knowledge 중
+    # 호환 가능한 부모가 정확히 하나라면 그 Knowledge를 사용한다.
+    elif not ai_result.target_knowledge_ids:
+        compatible_targets = [
+            row
+            for row in related_knowledge
+            if row.knowledge_type
+            in EXCEPTION_PARENT_TYPES
+        ]
+
+        if len(compatible_targets) == 1:
+            target = compatible_targets[0]
+
+    if target is None:
+        return (
+            ai_result,
+            None,
+        )
+
+    original_operation = ai_result.operation
+
+    reason = (
+        "Backend EXCEPTION preservation policy applied: "
+        "the EXCEPTION candidate is kept as an independent "
+        "Knowledge Unit and linked to the existing "
+        f"{target.knowledge_type} with HAS_EXCEPTION instead "
+        "of being absorbed into a new parent version. "
+        f"Original AI operation={original_operation}."
+    )
+
+    normalized = KnowledgeSynthesisAIResponse(
+        operation="ADD_EXCEPTION",
+        target_knowledge_ids=[
+            target.knowledge_id
+        ],
+        synthesized_knowledge_units=[
+            _candidate_to_exception_unit(
+                candidate
+            )
+        ],
+        relations=[
+            ProposedSynthesisRelation(
+                synthesized_index=0,
+                target_knowledge_id=(
+                    target.knowledge_id
+                ),
+                relation="HAS_EXCEPTION",
+                reason=(
+                    "The candidate is an explicit exception "
+                    "to the existing rule/principle and is "
+                    "preserved as a separate EXCEPTION "
+                    "Knowledge Unit."
+                ),
+            )
+        ],
+        reason=reason,
+    )
+
+    return (
+        normalized,
+        reason,
+    )
+
+
+def _attach_review_synthesis_if_waiting(
+    candidate: KnowledgeCandidate,
+    synthesis: KnowledgeSynthesis,
+) -> bool:
+    """
+    STALE 이후 수동 재-Synthesis된 REVIEW_REQUIRED Candidate를
+    새 Synthesis와 다시 연결한다.
+
+    최초 Auto Sync에서는 Candidate가 아직 REVIEW_REQUIRED가 아닐 수
+    있으므로 그 경우에는 아무 것도 변경하지 않는다.
+    """
+
+    if candidate.review_status != "REVIEW_REQUIRED":
+        return False
+
+    candidate.review_synthesis_id = (
+        synthesis.synthesis_id
+    )
+    candidate.review_reason = (
+        "Synthesis refreshed against the current knowledge graph; "
+        "human review is required before apply"
+    )
+
+    return True
 
 
 def _get_related_knowledge(
@@ -313,14 +527,35 @@ def synthesize_candidate(
             ),
         )
 
+    # AI 원본 응답은 provenance/debugging을 위해 별도로 보존한다.
+    raw_ai_response = (
+        ai_result.model_dump(
+            mode="json"
+        )
+    )
+
+    # ------------------------------------------------------
+    # Backend EXCEPTION preservation policy
+    #
+    # EXCEPTION Candidate를 기존 Rule/Principle의 새 Version에
+    # 흡수하지 않고 독립 EXCEPTION + HAS_EXCEPTION으로 보존한다.
+    # ------------------------------------------------------
+    ai_result, policy_reason = (
+        _normalize_exception_synthesis(
+            candidate=candidate,
+            related_knowledge=related_knowledge,
+            ai_result=ai_result,
+        )
+    )
+
     allowed_target_ids = {
         row.knowledge_id
         for row in related_knowledge
     }
 
     # ------------------------------------------------------
-    # AI가 Backend에서 전달하지 않은 Knowledge ID를
-    # 임의로 Relation 대상으로 반환하는 것 방지
+    # AI/정책 결과가 Backend에서 전달하지 않은 Knowledge ID를
+    # Relation 대상으로 반환하는 것 방지
     # ------------------------------------------------------
     for target_id in (
         ai_result.target_knowledge_ids
@@ -371,6 +606,25 @@ def synthesize_candidate(
             )
 
     try:
+        raw_response_payload = (
+            dict(raw_ai_response)
+        )
+
+        if policy_reason is not None:
+            raw_response_payload[
+                "_backend_policy"
+            ] = {
+                "name": (
+                    "EXCEPTION_PRESERVATION"
+                ),
+                "reason": policy_reason,
+                "normalized_result": (
+                    ai_result.model_dump(
+                        mode="json"
+                    )
+                ),
+            }
+
         synthesis = KnowledgeSynthesis(
             mission_id=analysis.mission_id,
             candidate_id=candidate.candidate_id,
@@ -387,14 +641,19 @@ def synthesize_candidate(
                 )
             ),
             raw_response=(
-                ai_result.model_dump(
-                    mode="json"
-                )
+                raw_response_payload
             ),
         )
 
         db.add(synthesis)
         db.flush()
+
+        # STALE 처리 후 사람이 재-Synthesis한 Candidate라면
+        # Review Queue가 새 Synthesis를 가리키도록 즉시 재연결한다.
+        _attach_review_synthesis_if_waiting(
+            candidate=candidate,
+            synthesis=synthesis,
+        )
 
         stored_units = []
 
