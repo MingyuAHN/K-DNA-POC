@@ -28,12 +28,73 @@ CROSS_TYPE_STRONG_CONTAINMENT_THRESHOLD = 0.78
 CROSS_TYPE_STRONG_TOKEN_CONTAINMENT_THRESHOLD = 0.65
 SAME_TYPE_MIN_SEMANTIC_SIMILARITY = 0.8
 SAME_TYPE_MIN_COMBINED_SCORE = 0.7
+
+# Same-type Candidate가 기존 Knowledge보다 훨씬 짧지만 동일한
+# 의미를 다시 진술하는 sub-claim인 경우를 위한 보수적 예외 경로.
+#
+# 일반 semantic duplicate threshold를 낮추지 않고 아래 조건을 모두
+# 만족할 때만 combined-score gate를 우회한다.
+SAME_TYPE_SUBCLAIM_MAX_LENGTH_RATIO = 0.8
+SAME_TYPE_SUBCLAIM_MIN_SEMANTIC_SIMILARITY = 0.8
+SAME_TYPE_SUBCLAIM_MIN_TAG_OVERLAP = 3
+SAME_TYPE_SUBCLAIM_MIN_TOKEN_CONTAINMENT = 0.15
+SAME_TYPE_SUBCLAIM_MIN_CHAR_CONTAINMENT = 0.15
+
 CROSS_TYPE_MIN_SEMANTIC_SIMILARITY = 0.8
 CROSS_TYPE_MIN_COMBINED_SCORE = 0.62
 CROSS_TYPE_MIN_TOKEN_CONTAINMENT = 0.18
 CROSS_TYPE_MIN_CHAR_CONTAINMENT = 0.25
 CROSS_TYPE_MIN_SEQUENCE_RATIO = 0.42
 CROSS_TYPE_HIGH_SEMANTIC_OVERRIDE = 0.9
+
+# AI가 동일한 장애 예외 규칙을 어떤 Turn에서는 EXCEPTION, 다른
+# Turn에서는 DECISION_RULE로 분류하는 type-drift를 위한 매우 제한적인
+# semantic no-op 경로다.
+#
+# 일반적인 EXCEPTION <-> DECISION_RULE을 같은 지식으로 취급하지 않는다.
+# 두 statement가 거의 같은 의사결정/예외 규칙을 말하고, Context 구조
+# support까지 강한 경우에만 기존 VERIFIED Knowledge를 재사용한다.
+EXCEPTION_DECISION_NOOP_MIN_SEMANTIC_SIMILARITY = 0.88
+EXCEPTION_DECISION_NOOP_MIN_SEQUENCE_RATIO = 0.60
+EXCEPTION_DECISION_NOOP_MIN_TOKEN_CONTAINMENT = 0.45
+EXCEPTION_DECISION_NOOP_MIN_CHAR_CONTAINMENT = 0.45
+EXCEPTION_DECISION_NOOP_MIN_TAG_OVERLAP = 3
+EXCEPTION_DECISION_NOOP_MIN_LENGTH_RATIO = 0.65
+EXCEPTION_DECISION_NOOP_MAX_LENGTH_RATIO = 1.35
+
+# Embedding 값에 의존하지 않고도 AI type-drift를 억제할 수 있는
+# 강한 lexical no-op 경로다. Context/polarity/exception-signal guard를
+# 모두 통과한 EXCEPTION <-> DECISION_RULE에만 적용한다.
+#
+# Final Graph E2E 실제 문장 기준으로는 sequence≈0.697,
+# token containment≈0.609, char containment≈0.570이므로,
+# 관련은 있지만 별개인 지식까지 합치지 않도록 세 지표를 모두 요구한다.
+EXCEPTION_DECISION_LEXICAL_NOOP_MIN_SEQUENCE_RATIO = 0.66
+EXCEPTION_DECISION_LEXICAL_NOOP_MIN_TOKEN_CONTAINMENT = 0.55
+EXCEPTION_DECISION_LEXICAL_NOOP_MIN_CHAR_CONTAINMENT = 0.50
+EXCEPTION_DECISION_LEXICAL_NOOP_MIN_TAG_OVERLAP = 3
+
+# 같은 조건부 허용 규칙이 한국어 조사/어미 차이 때문에 lexical threshold를
+# 아주 조금 밑도는 경우를 위한 보수적 fallback이다.
+#
+# 이 경로는 EXCEPTION <-> DECISION_RULE strict type-drift 비교에서만 사용하며,
+# 양쪽 statement가 모두:
+# - 허용 결론을 갖고
+# - 정상 경로의 불가/어려움을 조건으로 표현하고
+# - Context tags/constraints가 충분히 겹치는 경우에만 적용한다.
+#
+# Final Graph Turn4 실제 값:
+# sequence≈0.655, token containment≈0.455, char containment≈0.466,
+# tag overlap=5. 단순 threshold 완화가 아니라 의미 방향/조건 구조를 함께
+# 요구하여 '장애 종료 후 권한 회수' 같은 별개 규칙은 합치지 않는다.
+EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_SEQUENCE_RATIO = 0.64
+EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_TOKEN_CONTAINMENT = 0.40
+EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_CHAR_CONTAINMENT = 0.45
+EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_TAG_OVERLAP = 4
+
+EXCEPTION_SIGNAL_COVERAGE_MIN_TOKEN_CONTAINMENT = 0.50
+EXCEPTION_SIGNAL_COVERAGE_MIN_CHAR_CONTAINMENT = 0.50
+
 DUPLICATE_DIAGNOSTIC_MIN_SEMANTIC = 0.72
 RULE_LIKE_KNOWLEDGE_TYPES = {'PRINCIPLE', 'DECISION_RULE', 'HEURISTIC'}
 STRICT_CONTEXT_KEYS = ('project',)
@@ -329,6 +390,81 @@ def _expresses_sufficient_condition(value: str | None) -> bool:
 
     return any(verb in compact for verb in INSUFFICIENCY_DECISION_VERBS)
 
+
+def _expresses_conditional_unavailability(value: str | None) -> bool:
+    """
+    결론 자체의 금지가 아니라 예외/의사결정의 선행 조건에서
+    정상 경로를 사용할 수 없거나 사용하기 어렵다는 의미를 감지한다.
+
+    예:
+    - "API나 이벤트를 통한 확인이 불가능한 경우 허용한다"
+    - "API나 이벤트만으로 확인하기 어려운 경우 허용한다"
+
+    이런 "불가능"은 "직접 조회를 금지한다" 같은 결론 polarity가
+    아니라 예외를 활성화하는 조건이므로, 동일한 허용 결론끼리 비교할
+    때 단순 NEGATION marker 차이로 반대 의미라고 판단하면 안 된다.
+    """
+    compact = _compact_text(value)
+
+    if not compact:
+        return False
+
+    has_unavailability = any(
+        _compact_text(marker) in compact
+        for marker in (
+            '불가',
+            '불가능',
+            '어렵',
+            '곤란',
+            '없',
+        )
+    )
+
+    if not has_unavailability:
+        return False
+
+    return any(
+        marker in compact
+        for marker in (
+            '경우',
+            '상황',
+            '때',
+            '면',
+            '거나',
+        )
+    )
+
+
+def _expresses_positive_allowance(value: str | None) -> bool:
+    """
+    문장의 결론 방향이 "허용"인지 보수적으로 판정한다.
+
+    "허용하지 않는다" / "금지한다"처럼 명시적인 prohibition이
+    함께 있으면 positive allowance로 보지 않는다.
+    """
+    compact = _compact_text(value)
+
+    if not compact:
+        return False
+
+    prohibition_markers = (
+        '허용하지',
+        '금지',
+        '해서는안',
+        '하면안',
+        '하지말',
+        '말아야',
+    )
+
+    if any(
+        _compact_text(marker) in compact
+        for marker in prohibition_markers
+    ):
+        return False
+
+    return '허용' in compact
+
+
 def _statements_have_polarity_mismatch(
     left_statement: str | None,
     right_statement: str | None,
@@ -347,6 +483,26 @@ def _statements_have_polarity_mismatch(
         or (right_insufficient and left_sufficient)
     ):
         return True
+
+    # "API 확인이 불가능한 경우 직접 조회를 허용한다"와
+    # "API만으로 확인하기 어려운 경우 직접 조회를 허용한다"는
+    # 결론 polarity가 같다. 여기서 "불가능"은 금지 결론이 아니라
+    # 허용 규칙을 활성화하는 선행 조건이다.
+    #
+    # 기존 generic negation guard는 문장 어디에든 "불가능"이 있으면
+    # negative로 보므로, 실제 Final Graph E2E에서 동일 예외 규칙을
+    # 반대 의미로 오판했다. 두 문장 모두 positive allowance 결론이고
+    # 둘 다 정상 경로의 unavailable/difficult 조건을 표현할 때만
+    # 이 false-positive를 제한적으로 해제한다.
+    same_conditional_allowance_direction = (
+        _expresses_positive_allowance(left_statement)
+        and _expresses_positive_allowance(right_statement)
+        and _expresses_conditional_unavailability(left_statement)
+        and _expresses_conditional_unavailability(right_statement)
+    )
+
+    if same_conditional_allowance_direction:
+        return False
 
     left_hard_negative = _contains_any_marker(
         left_statement,
@@ -450,6 +606,78 @@ def _types_are_duplicate_compatible(candidate: KnowledgeCandidate, knowledge: Kn
     if candidate.knowledge_type == knowledge.knowledge_type:
         return True
     return candidate.knowledge_type in RULE_LIKE_KNOWLEDGE_TYPES and knowledge.knowledge_type in RULE_LIKE_KNOWLEDGE_TYPES
+
+
+def _types_are_exception_decision_noop_compatible(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+) -> bool:
+    """
+    EXCEPTION <-> DECISION_RULE type-drift는 일반 duplicate compatibility에
+    포함하지 않는다.
+
+    AI가 동일한 조건부 예외 규칙을 Turn마다 다른 type으로 분류하는
+    경우에만 아래의 strict semantic no-op 판정을 시도하기 위한 gate다.
+    실제 판정은 semantic/lexical/context 조건을 모두 추가로 확인한다.
+    """
+    return {
+        candidate.knowledge_type,
+        knowledge.knowledge_type,
+    } == {
+        'EXCEPTION',
+        'DECISION_RULE',
+    }
+
+
+def _candidate_exception_signal_is_covered_by_knowledge(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+) -> bool:
+    """
+    strict EXCEPTION <-> DECISION_RULE type-drift 비교에서 Candidate의
+    exception 필드가 기존 Knowledge에 이미 표현된 제한 조건인지 본다.
+
+    일반 duplicate 경로의 `_candidate_adds_exception_signal` 안전장치는
+    그대로 유지한다. 이 함수는 오직 type-drift no-op 경로에서,
+    Candidate exception이 기존 statement/exception에 충분히 포함된 경우만
+    예외적으로 비교를 계속할 수 있게 한다.
+    """
+    candidate_exception = (candidate.exception or '').strip()
+
+    if not candidate_exception:
+        return True
+
+    knowledge_text = ' '.join(
+        value
+        for value in (
+            knowledge.statement,
+            knowledge.exception,
+        )
+        if value
+    )
+
+    if not knowledge_text:
+        return False
+
+    if (
+        _normalize_text(candidate_exception)
+        == _normalize_text(knowledge.exception)
+        and _normalize_text(candidate_exception)
+    ):
+        return True
+
+    return (
+        _token_containment(
+            candidate_exception,
+            knowledge_text,
+        )
+        >= EXCEPTION_SIGNAL_COVERAGE_MIN_TOKEN_CONTAINMENT
+        and _char_containment(
+            candidate_exception,
+            knowledge_text,
+        )
+        >= EXCEPTION_SIGNAL_COVERAGE_MIN_CHAR_CONTAINMENT
+    )
 
 # --- Tag / cheap ranking helpers ---
 def _tag_token_set(context: dict | None) -> set[str]:
@@ -599,11 +827,57 @@ def _semantic_combined_score(metrics: _SimilarityMetrics, semantic_similarity: f
 
 def _is_semantic_duplicate(metrics: _SimilarityMetrics, semantic_similarity: float) -> tuple[bool, float]:
     combined_score = _semantic_combined_score(metrics=metrics, semantic_similarity=semantic_similarity)
+
     if metrics.same_type:
         if metrics.length_ratio > SAME_TYPE_MAX_LENGTH_RATIO:
             return (False, combined_score)
-        has_structural_support = metrics.tag_overlap_count >= 1 or metrics.token_containment >= 0.4 or metrics.char_containment >= 0.5
-        return (semantic_similarity >= SAME_TYPE_MIN_SEMANTIC_SIMILARITY and combined_score >= SAME_TYPE_MIN_COMBINED_SCORE and has_structural_support, combined_score)
+
+        has_structural_support = (
+            metrics.tag_overlap_count >= 1
+            or metrics.token_containment >= 0.4
+            or metrics.char_containment >= 0.5
+        )
+
+        normal_semantic_match = (
+            semantic_similarity
+            >= SAME_TYPE_MIN_SEMANTIC_SIMILARITY
+            and combined_score
+            >= SAME_TYPE_MIN_COMBINED_SCORE
+            and has_structural_support
+        )
+
+        # Candidate가 기존 Knowledge보다 훨씬 짧은 sub-claim이면
+        # Jaccard/sequence/combined score가 낮아질 수 있다.
+        #
+        # Public duplicate flow에서는 이 함수에 오기 전에 이미:
+        # - Context compatibility
+        # - polarity mismatch
+        # - Candidate의 새 exception/branch 추가 여부
+        # 를 검사한다.
+        #
+        # 따라서 동일 type, 충분히 짧은 Candidate, 강한 Context
+        # overlap, 최소 lexical containment, 높은 semantic similarity를
+        # 모두 만족하면 기존 Knowledge가 Candidate 의미를 이미
+        # 포함하는 것으로 보고 duplicate로 억제한다.
+        contained_subclaim_match = (
+            metrics.length_ratio
+            <= SAME_TYPE_SUBCLAIM_MAX_LENGTH_RATIO
+            and semantic_similarity
+            >= SAME_TYPE_SUBCLAIM_MIN_SEMANTIC_SIMILARITY
+            and metrics.tag_overlap_count
+            >= SAME_TYPE_SUBCLAIM_MIN_TAG_OVERLAP
+            and metrics.token_containment
+            >= SAME_TYPE_SUBCLAIM_MIN_TOKEN_CONTAINMENT
+            and metrics.char_containment
+            >= SAME_TYPE_SUBCLAIM_MIN_CHAR_CONTAINMENT
+        )
+
+        return (
+            normal_semantic_match
+            or contained_subclaim_match,
+            combined_score,
+        )
+
     if metrics.length_ratio > CROSS_TYPE_MAX_LENGTH_RATIO:
         return (False, combined_score)
     has_structural_support = metrics.token_containment >= CROSS_TYPE_MIN_TOKEN_CONTAINMENT or metrics.char_containment >= CROSS_TYPE_MIN_CHAR_CONTAINMENT or metrics.sequence_ratio >= CROSS_TYPE_MIN_SEQUENCE_RATIO
@@ -611,6 +885,118 @@ def _is_semantic_duplicate(metrics: _SimilarityMetrics, semantic_similarity: flo
     high_semantic_override = semantic_similarity >= CROSS_TYPE_HIGH_SEMANTIC_OVERRIDE and has_tag_support
     normal_semantic_match = semantic_similarity >= CROSS_TYPE_MIN_SEMANTIC_SIMILARITY and combined_score >= CROSS_TYPE_MIN_COMBINED_SCORE and has_tag_support and has_structural_support
     return (normal_semantic_match or high_semantic_override, combined_score)
+
+
+def _is_exception_decision_strong_lexical_noop(
+    metrics: _SimilarityMetrics,
+) -> bool:
+    """
+    EXCEPTION <-> DECISION_RULE type-drift 중 statement 자체가 이미
+    충분히 같은 경우를 embedding 없이 no-op으로 판정한다.
+
+    이 함수는 find_duplicate_active_knowledge에서 Context compatibility,
+    polarity, exception-signal coverage를 모두 통과한 뒤에만 호출된다.
+    따라서 일반적인 cross-type Knowledge를 합치는 용도가 아니다.
+
+    목적은 embedding 장애/모델 변동 또는 0.88 미만의 점수 때문에
+    명백한 type-drift duplicate가 새 version으로 흡수되는 것을 막는 것이다.
+    """
+    return (
+        EXCEPTION_DECISION_NOOP_MIN_LENGTH_RATIO
+        <= metrics.length_ratio
+        <= EXCEPTION_DECISION_NOOP_MAX_LENGTH_RATIO
+        and metrics.sequence_ratio
+        >= EXCEPTION_DECISION_LEXICAL_NOOP_MIN_SEQUENCE_RATIO
+        and metrics.token_containment
+        >= EXCEPTION_DECISION_LEXICAL_NOOP_MIN_TOKEN_CONTAINMENT
+        and metrics.char_containment
+        >= EXCEPTION_DECISION_LEXICAL_NOOP_MIN_CHAR_CONTAINMENT
+        and metrics.tag_overlap_count
+        >= EXCEPTION_DECISION_LEXICAL_NOOP_MIN_TAG_OVERLAP
+    )
+
+
+def _is_exception_decision_conditional_allowance_noop(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+    metrics: _SimilarityMetrics,
+) -> bool:
+    """
+    동일한 조건부 허용 규칙이 EXCEPTION / DECISION_RULE 사이에서
+    type-drift했지만 한국어 조사/어미 차이로 strong lexical threshold를
+    소폭 밑도는 경우를 위한 보수적 fallback이다.
+
+    일반 cross-type duplicate에는 사용하지 않는다. 호출부에서 이미:
+    - exact EXCEPTION <-> DECISION_RULE pair
+    - Context compatibility
+    - polarity safety
+    - exception-signal coverage
+    를 통과한 뒤에만 평가한다.
+
+    추가로 양쪽 statement가 모두 같은 '조건부 허용' 구조여야 한다.
+    즉 정상 경로가 불가능/어려운 조건에서 어떤 행위를 허용한다는
+    방향이 양쪽에 모두 있어야 한다. 이 때문에 '장애 종료 후 권한 회수'
+    같은 관련 있지만 별개의 DECISION_RULE은 이 경로를 통과하지 않는다.
+    """
+    return (
+        EXCEPTION_DECISION_NOOP_MIN_LENGTH_RATIO
+        <= metrics.length_ratio
+        <= EXCEPTION_DECISION_NOOP_MAX_LENGTH_RATIO
+        and _expresses_positive_allowance(candidate.statement)
+        and _expresses_positive_allowance(knowledge.statement)
+        and _expresses_conditional_unavailability(candidate.statement)
+        and _expresses_conditional_unavailability(knowledge.statement)
+        and metrics.sequence_ratio
+        >= EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_SEQUENCE_RATIO
+        and metrics.token_containment
+        >= EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_TOKEN_CONTAINMENT
+        and metrics.char_containment
+        >= EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_CHAR_CONTAINMENT
+        and metrics.tag_overlap_count
+        >= EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_TAG_OVERLAP
+    )
+
+
+def _is_exception_decision_semantic_noop(
+    metrics: _SimilarityMetrics,
+    semantic_similarity: float,
+) -> tuple[bool, float]:
+    """
+    동일한 장애 예외 규칙이 EXCEPTION/DECISION_RULE 사이에서 type-drift한
+    경우에만 허용하는 strict semantic no-op 판정이다.
+
+    일반 cross-type duplicate threshold와 분리하여 다음을 모두 요구한다.
+    - 높은 semantic similarity
+    - 강한 statement lexical overlap
+    - 강한 tags/constraints overlap
+    - 문장 길이가 과도하게 다르지 않음
+
+    따라서 '장애 시 직접 조회 허용'과 '장애 종료 후 권한 회수'처럼
+    서로 관련은 있지만 별개의 atomic knowledge는 합쳐지지 않는다.
+    """
+    combined_score = _semantic_combined_score(
+        metrics=metrics,
+        semantic_similarity=semantic_similarity,
+    )
+
+    return (
+        (
+            EXCEPTION_DECISION_NOOP_MIN_LENGTH_RATIO
+            <= metrics.length_ratio
+            <= EXCEPTION_DECISION_NOOP_MAX_LENGTH_RATIO
+            and semantic_similarity
+            >= EXCEPTION_DECISION_NOOP_MIN_SEMANTIC_SIMILARITY
+            and metrics.sequence_ratio
+            >= EXCEPTION_DECISION_NOOP_MIN_SEQUENCE_RATIO
+            and metrics.token_containment
+            >= EXCEPTION_DECISION_NOOP_MIN_TOKEN_CONTAINMENT
+            and metrics.char_containment
+            >= EXCEPTION_DECISION_NOOP_MIN_CHAR_CONTAINMENT
+            and metrics.tag_overlap_count
+            >= EXCEPTION_DECISION_NOOP_MIN_TAG_OVERLAP
+        ),
+        combined_score,
+    )
 
 
 # --- Post-synthesis material-change guard ---
@@ -1130,69 +1516,180 @@ def find_duplicate_active_knowledge(db: Session, mission_id: uuid.UUID, candidat
     2. 정규화 Exact
     3. 강한 lexical duplicate
     4. Embedding + lexical/context hybrid duplicate
+    5. EXCEPTION <-> DECISION_RULE strict semantic type-drift no-op
 
     Candidate가 기존보다 더 풍부하거나 예외/조건 분기를
     추가한 경우에는 Duplicate로 억제하지 않고
     Synthesis/ENRICH로 넘긴다.
+
+    EXCEPTION <-> DECISION_RULE은 일반 duplicate-compatible type으로
+    승격하지 않는다. 동일한 조건부 규칙이 AI type-drift로만 달라진
+    경우에 한해 strict semantic no-op 경로에서 기존 Knowledge를
+    재사용한다.
     """
     knowledge_rows = db.query(KnowledgeUnit).filter(KnowledgeUnit.mission_id == mission_id, KnowledgeUnit.status.in_(ACTIVE_KNOWLEDGE_STATUSES)).order_by(KnowledgeUnit.version.desc(), KnowledgeUnit.created_at.asc()).all()
     if not knowledge_rows:
         return None
+
     candidate_normalized = _normalize_text(candidate.statement)
     compatible_metrics: list[_SimilarityMetrics] = []
+    strict_type_drift_metrics: list[_SimilarityMetrics] = []
+
     for knowledge in knowledge_rows:
-        if not _types_are_duplicate_compatible(candidate=candidate, knowledge=knowledge):
+        normal_compatible = _types_are_duplicate_compatible(
+            candidate=candidate,
+            knowledge=knowledge,
+        )
+        strict_type_drift_compatible = (
+            _types_are_exception_decision_noop_compatible(
+                candidate=candidate,
+                knowledge=knowledge,
+            )
+        )
+
+        if not normal_compatible and not strict_type_drift_compatible:
             continue
+
         if not _contexts_are_compatible(candidate=candidate, knowledge=knowledge):
             continue
         if _has_polarity_mismatch(candidate=candidate, knowledge=knowledge):
             continue
-        if _candidate_adds_exception_signal(candidate=candidate, knowledge=knowledge):
-            continue
+
+        candidate_adds_exception = _candidate_adds_exception_signal(
+            candidate=candidate,
+            knowledge=knowledge,
+        )
+
+        if candidate_adds_exception:
+            if not strict_type_drift_compatible:
+                continue
+            if not _candidate_exception_signal_is_covered_by_knowledge(
+                candidate=candidate,
+                knowledge=knowledge,
+            ):
+                continue
+
         knowledge_normalized = _normalize_text(knowledge.statement)
         metrics = _build_metrics(candidate=candidate, knowledge=knowledge)
+
+        if strict_type_drift_compatible and not normal_compatible:
+            # 동일한 조건부 규칙이 type만 drift한 것이 lexical 지표만으로도
+            # 충분히 명확하면 embedding 결과에 의존하지 않고 기존 Knowledge를
+            # 재사용한다. Context/polarity/exception-signal guard는 이미 위에서
+            # 통과했으므로 unrelated EXCEPTION/DECISION_RULE에는 적용되지 않는다.
+            if _is_exception_decision_strong_lexical_noop(metrics):
+                return DuplicateKnowledgeMatch(
+                    knowledge=knowledge,
+                    match_type='EXCEPTION_DECISION_TYPE_DRIFT_LEXICAL_NOOP',
+                    sequence_ratio=metrics.sequence_ratio,
+                    token_jaccard=metrics.token_jaccard,
+                    token_containment=metrics.token_containment,
+                    char_containment=metrics.char_containment,
+                    semantic_similarity=None,
+                    combined_score=_cheap_rank_score(metrics),
+                    tag_overlap_count=metrics.tag_overlap_count,
+                )
+
+            # Final Graph Turn4처럼 같은 조건부 허용 규칙인데도 한국어
+            # 조사/어미 차이로 기존 lexical threshold를 소폭 밑도는 경우다.
+            # 단순 threshold 완화가 아니라 양쪽의 허용 결론 + 정상 경로
+            # 불가/어려움 조건 + 강한 Context overlap을 모두 요구한다.
+            if _is_exception_decision_conditional_allowance_noop(
+                candidate=candidate,
+                knowledge=knowledge,
+                metrics=metrics,
+            ):
+                return DuplicateKnowledgeMatch(
+                    knowledge=knowledge,
+                    match_type=(
+                        'EXCEPTION_DECISION_TYPE_DRIFT_CONDITIONAL_NOOP'
+                    ),
+                    sequence_ratio=metrics.sequence_ratio,
+                    token_jaccard=metrics.token_jaccard,
+                    token_containment=metrics.token_containment,
+                    char_containment=metrics.char_containment,
+                    semantic_similarity=None,
+                    combined_score=_cheap_rank_score(metrics),
+                    tag_overlap_count=metrics.tag_overlap_count,
+                )
+
+            # Lexical no-op까지는 아니면 embedding을 포함한 더 엄격한
+            # semantic no-op 판정을 시도한다.
+            strict_type_drift_metrics.append(metrics)
+            continue
+
         if candidate_normalized and candidate_normalized == knowledge_normalized:
             return DuplicateKnowledgeMatch(knowledge=knowledge, match_type='EXACT', sequence_ratio=1.0, token_jaccard=1.0, token_containment=1.0, char_containment=1.0, semantic_similarity=None, combined_score=1.0, tag_overlap_count=metrics.tag_overlap_count)
         if _is_contained_insufficiency_duplicate(candidate=candidate, knowledge=knowledge, metrics=metrics):
             return DuplicateKnowledgeMatch(knowledge=knowledge, match_type='INSUFFICIENCY_CONTAINMENT', sequence_ratio=metrics.sequence_ratio, token_jaccard=metrics.token_jaccard, token_containment=metrics.token_containment, char_containment=metrics.char_containment, semantic_similarity=None, combined_score=_cheap_rank_score(metrics), tag_overlap_count=metrics.tag_overlap_count)
         compatible_metrics.append(metrics)
-    if not compatible_metrics:
+
+    if not compatible_metrics and not strict_type_drift_metrics:
         return None
+
     lexical_matches = [metrics for metrics in compatible_metrics if _is_strong_lexical_duplicate(metrics)]
     if lexical_matches:
         lexical_matches.sort(key=_cheap_rank_score, reverse=True)
         best = lexical_matches[0]
         return DuplicateKnowledgeMatch(knowledge=best.knowledge, match_type='SAME_TYPE_LEXICAL' if best.same_type else 'CROSS_TYPE_LEXICAL', sequence_ratio=best.sequence_ratio, token_jaccard=best.token_jaccard, token_containment=best.token_containment, char_containment=best.char_containment, semantic_similarity=None, combined_score=_cheap_rank_score(best), tag_overlap_count=best.tag_overlap_count)
-    compatible_metrics.sort(key=_cheap_rank_score, reverse=True)
-    semantic_candidates = compatible_metrics[:SEMANTIC_CANDIDATE_LIMIT]
+
+    semantic_pool: list[tuple[_SimilarityMetrics, bool]] = [
+        (metrics, False)
+        for metrics in compatible_metrics
+    ]
+    semantic_pool.extend(
+        (metrics, True)
+        for metrics in strict_type_drift_metrics
+    )
+    semantic_pool.sort(
+        key=lambda item: _cheap_rank_score(item[0]),
+        reverse=True,
+    )
+    semantic_candidates = semantic_pool[:SEMANTIC_CANDIDATE_LIMIT]
+
     cache = embedding_cache if embedding_cache is not None else {}
     texts = [candidate.statement]
-    texts.extend((metrics.knowledge.statement for metrics in semantic_candidates))
+    texts.extend((metrics.knowledge.statement for metrics, _ in semantic_candidates))
     _get_embedding_vectors(texts=texts, embedding_cache=cache)
+
     best_match: DuplicateKnowledgeMatch | None = None
     best_score = 0.0
     best_observed_metrics: _SimilarityMetrics | None = None
     best_observed_semantic: float | None = None
     best_observed_combined = 0.0
-    for metrics in semantic_candidates:
+
+    for metrics, strict_type_drift in semantic_candidates:
         semantic_similarity = _semantic_similarity(candidate_statement=candidate.statement, knowledge_statement=metrics.knowledge.statement, embedding_cache=cache)
         if semantic_similarity is None:
             continue
-        is_duplicate, combined_score = _is_semantic_duplicate(metrics=metrics, semantic_similarity=semantic_similarity)
+
+        if strict_type_drift:
+            is_duplicate, combined_score = _is_exception_decision_semantic_noop(
+                metrics=metrics,
+                semantic_similarity=semantic_similarity,
+            )
+            match_type = 'EXCEPTION_DECISION_TYPE_DRIFT_NOOP'
+        else:
+            is_duplicate, combined_score = _is_semantic_duplicate(metrics=metrics, semantic_similarity=semantic_similarity)
+            match_type = 'SAME_TYPE_SEMANTIC' if metrics.same_type else 'CROSS_TYPE_SEMANTIC'
+
         if best_observed_semantic is None or semantic_similarity > best_observed_semantic:
             best_observed_metrics = metrics
             best_observed_semantic = semantic_similarity
             best_observed_combined = combined_score
         if not is_duplicate:
             continue
+
         ranking_score = combined_score + (0.01 if metrics.same_type else 0.0)
         if ranking_score <= best_score:
             continue
         best_score = ranking_score
-        best_match = DuplicateKnowledgeMatch(knowledge=metrics.knowledge, match_type='SAME_TYPE_SEMANTIC' if metrics.same_type else 'CROSS_TYPE_SEMANTIC', sequence_ratio=metrics.sequence_ratio, token_jaccard=metrics.token_jaccard, token_containment=metrics.token_containment, char_containment=metrics.char_containment, semantic_similarity=semantic_similarity, combined_score=combined_score, tag_overlap_count=metrics.tag_overlap_count)
+        best_match = DuplicateKnowledgeMatch(knowledge=metrics.knowledge, match_type=match_type, sequence_ratio=metrics.sequence_ratio, token_jaccard=metrics.token_jaccard, token_containment=metrics.token_containment, char_containment=metrics.char_containment, semantic_similarity=semantic_similarity, combined_score=combined_score, tag_overlap_count=metrics.tag_overlap_count)
+
     if best_match is None and best_observed_metrics is not None and (best_observed_semantic is not None) and (best_observed_semantic >= DUPLICATE_DIAGNOSTIC_MIN_SEMANTIC):
         logger.warning('Duplicate candidate not suppressed; best semantic candidate metrics: candidate_id=%s knowledge_id=%s candidate_type=%s knowledge_type=%s semantic=%.4f combined=%.4f sequence=%.4f token_jaccard=%.4f token_containment=%.4f char_containment=%.4f length_ratio=%.4f tags=%s', candidate.candidate_id, best_observed_metrics.knowledge.knowledge_id, candidate.knowledge_type, best_observed_metrics.knowledge.knowledge_type, best_observed_semantic, best_observed_combined, best_observed_metrics.sequence_ratio, best_observed_metrics.token_jaccard, best_observed_metrics.token_containment, best_observed_metrics.char_containment, best_observed_metrics.length_ratio, best_observed_metrics.tag_overlap_count)
     return best_match
+
 
 # --- Evidence reuse for suppressed duplicates ---
 def reuse_existing_knowledge_for_duplicate(db: Session, analysis: InterviewAnalysis, candidate: KnowledgeCandidate, match: DuplicateKnowledgeMatch) -> None:

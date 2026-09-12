@@ -32,6 +32,7 @@ from app.schemas.knowledge_synthesis_apply import (
 )
 from app.services.knowledge_duplicate_service import (
     assess_synthesized_unit_material_change,
+    find_duplicate_active_knowledge,
 )
 
 
@@ -370,6 +371,181 @@ def _mark_waiting_syntheses_stale_after_graph_change(
         )
 
     return stale_count
+
+
+def _find_newer_applied_mission_graph_synthesis(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+) -> KnowledgeSynthesis | None:
+    """
+    현재 Synthesis 생성 이후 같은 Mission에서 실제 Knowledge Unit을
+    생성한 다른 APPLIED Synthesis가 있는지 확인한다.
+
+    No-op reuse는 APPLIED 상태가 되더라도 새 Knowledge Unit을 만들지
+    않으므로 graph change로 취급하지 않는다.
+    """
+
+    created_at = synthesis.created_at
+
+    rows = (
+        db.query(KnowledgeSynthesis)
+        .filter(
+            KnowledgeSynthesis.mission_id
+            == synthesis.mission_id,
+            KnowledgeSynthesis.synthesis_id
+            != synthesis.synthesis_id,
+            KnowledgeSynthesis.status == "APPLIED",
+            KnowledgeSynthesis.applied_at.isnot(None),
+        )
+        .order_by(KnowledgeSynthesis.applied_at.desc())
+        .all()
+    )
+
+    synthesis_created_ts = _datetime_timestamp(created_at)
+
+    for applied in rows:
+        applied_ts = _datetime_timestamp(applied.applied_at)
+
+        if applied_ts is None:
+            continue
+
+        if (
+            synthesis_created_ts is not None
+            and applied_ts <= synthesis_created_ts
+        ):
+            continue
+
+        created_knowledge = (
+            db.query(KnowledgeUnit)
+            .filter(
+                KnowledgeUnit.source_synthesis_id
+                == applied.synthesis_id
+            )
+            .first()
+        )
+
+        if created_knowledge is not None:
+            return applied
+
+    return None
+
+
+def _mark_waiting_mission_syntheses_stale_after_graph_change(
+    db: Session,
+    mission_id: uuid.UUID,
+    applied_candidate_id: uuid.UUID,
+    applied_synthesis_id: uuid.UUID,
+    validated_by: str | None,
+    now: datetime,
+) -> int:
+    """
+    Knowledge Graph가 실제 변경되면 같은 Mission에서 이미 만들어져
+    대기 중인 모든 PENDING/APPROVED Synthesis를 STALE 처리한다.
+
+    Analysis 경계를 넘어 stale snapshot 적용을 차단하기 위한 guard다.
+    """
+
+    mission_candidate_rows = (
+        db.query(KnowledgeCandidate)
+        .join(
+            InterviewAnalysis,
+            InterviewAnalysis.analysis_id
+            == KnowledgeCandidate.analysis_id,
+        )
+        .filter(
+            InterviewAnalysis.mission_id == mission_id,
+            KnowledgeCandidate.candidate_id
+            != applied_candidate_id,
+        )
+        .all()
+    )
+
+    if not mission_candidate_rows:
+        return 0
+
+    candidate_map = {
+        row.candidate_id: row
+        for row in mission_candidate_rows
+    }
+
+    waiting_syntheses = (
+        db.query(KnowledgeSynthesis)
+        .filter(
+            KnowledgeSynthesis.mission_id == mission_id,
+            KnowledgeSynthesis.candidate_id.in_(
+                list(candidate_map.keys())
+            ),
+            KnowledgeSynthesis.synthesis_id
+            != applied_synthesis_id,
+            KnowledgeSynthesis.status.in_(
+                ("PENDING", "APPROVED")
+            ),
+        )
+        .all()
+    )
+
+    stale_count = 0
+
+    for waiting_synthesis in waiting_syntheses:
+        candidate = candidate_map.get(
+            waiting_synthesis.candidate_id
+        )
+
+        if candidate is None:
+            continue
+
+        _mark_synthesis_stale_for_graph_change(
+            synthesis=waiting_synthesis,
+            candidate=candidate,
+            applied_synthesis_id=applied_synthesis_id,
+            validated_by=validated_by,
+            now=now,
+        )
+        stale_count += 1
+
+    if stale_count:
+        db.flush()
+
+        logger.info(
+            (
+                "Marked %s waiting mission syntheses STALE after "
+                "knowledge graph change mission_id=%s "
+                "applied_candidate_id=%s applied_synthesis_id=%s"
+            ),
+            stale_count,
+            mission_id,
+            applied_candidate_id,
+            applied_synthesis_id,
+        )
+
+    return stale_count
+
+
+def _mark_synthesis_stale_for_policy_violation(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+    candidate: KnowledgeCandidate,
+    reason: str,
+    validated_by: str | None,
+    now: datetime,
+) -> None:
+    synthesis.status = "STALE"
+    synthesis.validated_by = (
+        validated_by
+        or "K-DNA KNOWLEDGE POLICY GUARD"
+    )
+    synthesis.validation_reason = reason
+    synthesis.validated_at = now
+
+    if candidate.review_status == "REVIEW_REQUIRED":
+        candidate.review_synthesis_id = None
+        candidate.review_reason = (
+            f"{reason}; re-synthesis is required"
+        )
+
+    db.commit()
+    db.refresh(synthesis)
+    db.refresh(candidate)
 
 
 def _get_targets(
@@ -873,9 +1049,9 @@ def validate_and_apply_synthesis(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Knowledge synthesis is stale because "
-                "the candidate was edited; create a "
-                "new synthesis before validation"
+                "Knowledge synthesis is stale; create a new "
+                "synthesis against the current candidate and "
+                "knowledge graph before validation"
             ),
         )
 
@@ -904,6 +1080,46 @@ def validate_and_apply_synthesis(
     )
 
     now = _utcnow()
+
+    # ------------------------------------------------------
+    # Mission-wide pre-approve graph-snapshot freshness guard
+    #
+    # Synthesis 생성 이후 같은 Mission에서 다른 Synthesis가 실제
+    # Knowledge Unit을 생성했다면 기존 Synthesis의 target/graph 판단은
+    # 오래된 snapshot이다. Analysis가 달라도 반드시 재-Synthesis한다.
+    # ------------------------------------------------------
+    if request.decision == "APPROVE":
+        newer_mission_graph_change = (
+            _find_newer_applied_mission_graph_synthesis(
+                db=db,
+                synthesis=synthesis,
+            )
+        )
+
+        if newer_mission_graph_change is not None:
+            _mark_synthesis_stale_for_graph_change(
+                synthesis=synthesis,
+                candidate=candidate,
+                applied_synthesis_id=(
+                    newer_mission_graph_change.synthesis_id
+                ),
+                validated_by=request.validated_by,
+                now=now,
+            )
+
+            db.commit()
+            db.refresh(synthesis)
+            db.refresh(candidate)
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Knowledge synthesis is stale because the "
+                    "mission knowledge graph changed after this "
+                    "synthesis was created; create a new synthesis "
+                    "before validation"
+                ),
+            )
 
     # ------------------------------------------------------
     # Same-analysis pre-approve graph-snapshot freshness guard
@@ -1118,6 +1334,145 @@ def validate_and_apply_synthesis(
             ),
         )
 
+    # ------------------------------------------------------
+    # Synthesis structure guard
+    # ------------------------------------------------------
+    if (
+        request.decision == "APPROVE"
+        and synthesis.operation in {
+            "ENRICH",
+            "SUPERSEDE",
+        }
+        and (
+            len(targets) != 1
+            or len(proposals) != 1
+        )
+    ):
+        reason = (
+            f"{synthesis.operation} requires exactly one target "
+            "knowledge and one synthesized unit"
+        )
+        _mark_synthesis_stale_for_policy_violation(
+            db=db,
+            synthesis=synthesis,
+            candidate=candidate,
+            reason=reason,
+            validated_by=request.validated_by,
+            now=now,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                reason
+                + "; create a new synthesis before validation"
+            ),
+        )
+
+    if (
+        request.decision == "APPROVE"
+        and synthesis.operation == "ADD_EXCEPTION"
+        and (
+            len(targets) != 1
+            or len(proposals) != 1
+        )
+    ):
+        reason = (
+            "ADD_EXCEPTION requires exactly one parent target and "
+            "one synthesized exception unit"
+        )
+        _mark_synthesis_stale_for_policy_violation(
+            db=db,
+            synthesis=synthesis,
+            candidate=candidate,
+            reason=reason,
+            validated_by=request.validated_by,
+            now=now,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                reason
+                + "; create a new synthesis before validation"
+            ),
+        )
+
+    # ------------------------------------------------------
+    # Atomic version-chain policy guard
+    #
+    # ENRICH/SUPERSEDE는 Candidate / target / proposal type이 모두
+    # 동일할 때만 같은 root의 새 Version으로 적용한다.
+    # ------------------------------------------------------
+    if (
+        request.decision == "APPROVE"
+        and synthesis.operation in {
+            "ENRICH",
+            "SUPERSEDE",
+        }
+        and len(targets) == 1
+        and len(proposals) == 1
+    ):
+        version_target = targets[0]
+        version_proposal = proposals[0]
+
+        same_type_chain = (
+            candidate.knowledge_type
+            == version_target.knowledge_type
+            == version_proposal.knowledge_type
+        )
+
+        if not same_type_chain:
+            reason = (
+                "Cross-type knowledge version update is not allowed: "
+                f"candidate={candidate.knowledge_type}, "
+                f"target={version_target.knowledge_type}, "
+                f"proposal={version_proposal.knowledge_type}"
+            )
+            _mark_synthesis_stale_for_policy_violation(
+                db=db,
+                synthesis=synthesis,
+                candidate=candidate,
+                reason=reason,
+                validated_by=request.validated_by,
+                now=now,
+            )
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    reason
+                    + "; create a new synthesis before validation"
+                ),
+            )
+
+    # MERGE는 독립 신규 Knowledge 생성에만 사용한다. 기존 target을
+    # SUPERSEDE하는 multi-root MERGE는 현재 KnowledgeUnit version model과
+    # 일치하지 않으므로 적용하지 않는다.
+    if (
+        request.decision == "APPROVE"
+        and synthesis.operation == "MERGE"
+        and (targets or len(proposals) != 1)
+    ):
+        reason = (
+            "MERGE must create exactly one independent Knowledge Unit "
+            "and must not have version targets"
+        )
+        _mark_synthesis_stale_for_policy_violation(
+            db=db,
+            synthesis=synthesis,
+            candidate=candidate,
+            reason=reason,
+            validated_by=request.validated_by,
+            now=now,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                reason
+                + "; create a new synthesis before validation"
+            ),
+        )
+
     try:
         synthesis.status = "APPROVED"
 
@@ -1162,6 +1517,153 @@ def validate_and_apply_synthesis(
 
             target = targets[0]
             proposal = proposals[0]
+
+            # --------------------------------------------------
+            # Cross-graph Duplicate / No-op Guard
+            #
+            # AI가 Candidate와 같은 type의 target을 골라 ENRICH/SUPERSEDE를
+            # 제안하더라도, Candidate 자체가 Mission의 다른 활성 Knowledge와
+            # 이미 같은 의미일 수 있다.
+            #
+            # 대표 예:
+            #   existing EXCEPTION  : 장애 중 긴급 직접 읽기 조회 예외
+            #   existing DECISION_RULE: 장애 종료 후 권한 회수
+            #   candidate           : 위 EXCEPTION의 type-drift DECISION_RULE
+            #
+            # 이때 AI가 DECISION_RULE target을 ENRICH해 두 atomic knowledge를
+            # 한 version으로 흡수하면 granularity가 다시 깨진다. 실제 version
+            # 생성 전에 Candidate를 현재 Mission의 전체 활성 Knowledge와 다시
+            # 비교하고, 이미 존재하는 의미라면 그 Knowledge를 재사용한다.
+            # --------------------------------------------------
+            duplicate_match = (
+                find_duplicate_active_knowledge(
+                    db=db,
+                    mission_id=synthesis.mission_id,
+                    candidate=candidate,
+                    embedding_cache=(
+                        material_change_embedding_cache
+                    ),
+                )
+            )
+
+            if duplicate_match is not None:
+                existing_knowledge = (
+                    duplicate_match.knowledge
+                )
+
+                proposal.validation_status = "VERIFIED"
+                proposal.applied_knowledge_id = (
+                    existing_knowledge.knowledge_id
+                )
+
+                _create_evidence(
+                    db=db,
+                    knowledge=existing_knowledge,
+                    synthesis=synthesis,
+                    candidate=candidate,
+                    analysis=analysis,
+                )
+
+                candidate.validation_status = "VERIFIED"
+
+                if (
+                    candidate.review_status
+                    == "REVIEW_REQUIRED"
+                ):
+                    candidate.review_status = "RESOLVED"
+                    candidate.review_synthesis_id = (
+                        synthesis.synthesis_id
+                    )
+
+                    if request.reason:
+                        candidate.review_reason = (
+                            request.reason
+                        )
+
+                synthesis.status = "APPLIED"
+                synthesis.applied_at = now
+                synthesis.resulting_knowledge_ids = [
+                    str(existing_knowledge.knowledge_id)
+                ]
+
+                base_reason = (
+                    request.reason.strip()
+                    if request.reason
+                    and request.reason.strip()
+                    else "Synthesis approved"
+                )
+                synthesis.validation_reason = (
+                    f"{base_reason}; candidate duplicate/no-op, "
+                    f"existing active knowledge reused; "
+                    f"match_type={duplicate_match.match_type}"
+                )
+
+                db.commit()
+                db.refresh(synthesis)
+                db.refresh(candidate)
+                db.refresh(proposal)
+
+                logger.info(
+                    (
+                        "Knowledge version absorption suppressed "
+                        "synthesis_id=%s candidate_id=%s "
+                        "proposed_target_id=%s "
+                        "reused_knowledge_id=%s match_type=%s"
+                    ),
+                    synthesis.synthesis_id,
+                    candidate.candidate_id,
+                    target.knowledge_id,
+                    existing_knowledge.knowledge_id,
+                    duplicate_match.match_type,
+                )
+
+                return (
+                    KnowledgeSynthesisValidationResponse(
+                        synthesis_id=(
+                            synthesis.synthesis_id
+                        ),
+                        decision="APPROVE",
+                        status="APPLIED",
+                        operation=(
+                            synthesis.operation
+                        ),
+                        resulting_knowledge_ids=[
+                            existing_knowledge.knowledge_id
+                        ],
+                        knowledge_units=[
+                            AppliedKnowledgeUnit(
+                                synthesis_unit_id=(
+                                    proposal
+                                    .synthesis_unit_id
+                                ),
+                                knowledge_id=(
+                                    existing_knowledge
+                                    .knowledge_id
+                                ),
+                                knowledge_type=(
+                                    existing_knowledge
+                                    .knowledge_type
+                                ),
+                                statement=(
+                                    existing_knowledge
+                                    .statement
+                                ),
+                                version=(
+                                    existing_knowledge
+                                    .version
+                                ),
+                                status=(
+                                    existing_knowledge
+                                    .status
+                                ),
+                            )
+                        ],
+                        reason=request.reason,
+                        validated_by=(
+                            request.validated_by
+                        ),
+                    )
+                )
 
             root_id = (
                 target.root_knowledge_id
@@ -1351,54 +1853,175 @@ def validate_and_apply_synthesis(
 
         # --------------------------------------------------
         # MERGE
+        #
+        # MERGE는 기존 Knowledge를 대체하지 않는다. 독립 신규
+        # atomic Knowledge Unit 1개를 생성하는 operation으로 제한한다.
+        # 기존 Knowledge와의 의미 관계는 아래 AI Relation 단계에서만
+        # SUPPORTS/REFINES/HAS_EXCEPTION 등으로 표현한다.
         # --------------------------------------------------
         elif synthesis.operation == "MERGE":
 
-            for proposal in proposals:
+            proposal = proposals[0]
 
-                knowledge = _create_new_unit(
+            # --------------------------------------------------
+            # Post-freshness Duplicate / No-op Guard
+            #
+            # Candidate가 처음 만들어졌을 때는 Mission Graph가 비어
+            # 있었더라도, Human Review 대기 중 다른 Candidate가 먼저
+            # 승인되면 동일 의미의 VERIFIED Knowledge가 생길 수 있다.
+            #
+            # Freshness guard로 기존 Synthesis를 STALE 처리한 뒤
+            # 수동 re-Synthesis하면 operation이 독립 MERGE로 다시
+            # 생성될 수 있으므로, 실제 새 Knowledge Unit을 만들기
+            # 직전에 현재 활성 Graph 기준 duplicate를 한 번 더
+            # 확인한다.
+            #
+            # Duplicate라면 새 Unit/version을 만들지 않고 기존
+            # Knowledge를 재사용하고 이번 Interview Message만
+            # Evidence로 누적한다. 이 경로는 Graph를 변경하지 않으므로
+            # 다른 대기 Synthesis를 다시 STALE 처리하지 않는다.
+            # --------------------------------------------------
+            duplicate_match = (
+                find_duplicate_active_knowledge(
                     db=db,
-                    synthesis=synthesis,
-                    proposal=proposal,
-                    source_candidate_id=(
-                        candidate.candidate_id
+                    mission_id=synthesis.mission_id,
+                    candidate=candidate,
+                    embedding_cache=(
+                        material_change_embedding_cache
                     ),
                 )
+            )
 
-                applied_map[
-                    proposal.synthesized_index
-                ] = knowledge
+            if duplicate_match is not None:
+                existing_knowledge = (
+                    duplicate_match.knowledge
+                )
 
-            for target in targets:
+                proposal.validation_status = "VERIFIED"
+                proposal.applied_knowledge_id = (
+                    existing_knowledge.knowledge_id
+                )
 
-                if target.status not in {
-                    "SUPERSEDED",
-                    "RETIRED",
-                }:
-                    target.status = "SUPERSEDED"
+                _create_evidence(
+                    db=db,
+                    knowledge=existing_knowledge,
+                    synthesis=synthesis,
+                    candidate=candidate,
+                    analysis=analysis,
+                )
 
-                for knowledge in (
-                    applied_map.values()
+                candidate.validation_status = "VERIFIED"
+
+                if (
+                    candidate.review_status
+                    == "REVIEW_REQUIRED"
                 ):
+                    candidate.review_status = "RESOLVED"
+                    candidate.review_synthesis_id = (
+                        synthesis.synthesis_id
+                    )
 
-                    _add_relation_if_missing(
-                        db=db,
-                        mission_id=(
-                            synthesis.mission_id
+                    if request.reason:
+                        candidate.review_reason = (
+                            request.reason
+                        )
+
+                synthesis.status = "APPLIED"
+                synthesis.applied_at = now
+                synthesis.resulting_knowledge_ids = [
+                    str(existing_knowledge.knowledge_id)
+                ]
+
+                base_reason = (
+                    request.reason.strip()
+                    if request.reason
+                    and request.reason.strip()
+                    else "Synthesis approved"
+                )
+                synthesis.validation_reason = (
+                    f"{base_reason}; duplicate/no-op candidate, "
+                    "existing active knowledge reused; "
+                    f"match_type={duplicate_match.match_type}, "
+                    f"combined_score="
+                    f"{duplicate_match.combined_score:.4f}"
+                )
+
+                db.commit()
+                db.refresh(synthesis)
+                db.refresh(candidate)
+                db.refresh(proposal)
+
+                logger.info(
+                    (
+                        "Independent MERGE duplicate suppressed "
+                        "synthesis_id=%s candidate_id=%s "
+                        "knowledge_id=%s match_type=%s "
+                        "combined_score=%.4f"
+                    ),
+                    synthesis.synthesis_id,
+                    candidate.candidate_id,
+                    existing_knowledge.knowledge_id,
+                    duplicate_match.match_type,
+                    duplicate_match.combined_score,
+                )
+
+                return (
+                    KnowledgeSynthesisValidationResponse(
+                        synthesis_id=(
+                            synthesis.synthesis_id
                         ),
-                        source_id=(
-                            knowledge.knowledge_id
+                        decision="APPROVE",
+                        status="APPLIED",
+                        operation=(
+                            synthesis.operation
                         ),
-                        target_id=(
-                            target.knowledge_id
-                        ),
-                        relation_type="SUPERSEDES",
-                        source_analysis_id=(
-                            analysis.analysis_id
-                            if analysis is not None
-                            else None
+                        resulting_knowledge_ids=[
+                            existing_knowledge.knowledge_id
+                        ],
+                        knowledge_units=[
+                            AppliedKnowledgeUnit(
+                                synthesis_unit_id=(
+                                    proposal
+                                    .synthesis_unit_id
+                                ),
+                                knowledge_id=(
+                                    existing_knowledge
+                                    .knowledge_id
+                                ),
+                                knowledge_type=(
+                                    existing_knowledge
+                                    .knowledge_type
+                                ),
+                                statement=(
+                                    existing_knowledge.statement
+                                ),
+                                version=(
+                                    existing_knowledge.version
+                                ),
+                                status=(
+                                    existing_knowledge.status
+                                ),
+                            )
+                        ],
+                        reason=request.reason,
+                        validated_by=(
+                            request.validated_by
                         ),
                     )
+                )
+
+            knowledge = _create_new_unit(
+                db=db,
+                synthesis=synthesis,
+                proposal=proposal,
+                source_candidate_id=(
+                    candidate.candidate_id
+                ),
+            )
+
+            applied_map[
+                proposal.synthesized_index
+            ] = knowledge
 
         # --------------------------------------------------
         # ADD_EXCEPTION
@@ -1499,16 +2122,29 @@ def validate_and_apply_synthesis(
                 proposal_relation.relation_type
             )
 
-            # ENRICH로 생성된 새 Version이 바로 이전 Version을
-            # 단순 SUPPORTS한다고 저장되면 SUPERSEDES + SUPPORTS라는
-            # 애매한 version edge가 생긴다. Direct target에 대한
-            # SUPPORTS는 version semantics에 맞춰 REFINES로 정규화한다.
+            # 같은 Version pair에는 SUPERSEDES만 남긴다. AI가
+            # SUPPORTS/REFINES/SUPERSEDES를 함께 제안해도 predecessor와의
+            # 중복 의미 edge를 추가하지 않는다.
             if (
-                synthesis.operation == "ENRICH"
-                and relation_type == "SUPPORTS"
+                synthesis.operation in {
+                    "ENRICH",
+                    "SUPERSEDE",
+                }
                 and len(targets) == 1
-                and target_id
-                == targets[0].knowledge_id
+                and target_id == targets[0].knowledge_id
+                and relation_type in {
+                    "SUPPORTS",
+                    "REFINES",
+                    "SUPERSEDES",
+                }
+            ):
+                continue
+
+            # MERGE는 version replacement가 아니므로 legacy/AI가 남긴
+            # SUPERSEDES relation은 semantic REFINES로 낮춘다.
+            if (
+                synthesis.operation == "MERGE"
+                and relation_type == "SUPERSEDES"
             ):
                 relation_type = "REFINES"
 
@@ -1602,6 +2238,17 @@ def validate_and_apply_synthesis(
             _mark_waiting_syntheses_stale_after_graph_change(
                 db=db,
                 analysis_id=analysis.analysis_id,
+                applied_candidate_id=candidate.candidate_id,
+                applied_synthesis_id=synthesis.synthesis_id,
+                validated_by=request.validated_by,
+                now=now,
+            )
+
+            # Analysis가 다른 Review Candidate도 동일 Mission Graph의
+            # 오래된 snapshot을 들고 있을 수 있으므로 함께 STALE 처리한다.
+            _mark_waiting_mission_syntheses_stale_after_graph_change(
+                db=db,
+                mission_id=synthesis.mission_id,
                 applied_candidate_id=candidate.candidate_id,
                 applied_synthesis_id=synthesis.synthesis_id,
                 validated_by=request.validated_by,

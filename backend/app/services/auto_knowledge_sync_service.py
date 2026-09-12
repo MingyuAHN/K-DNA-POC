@@ -13,7 +13,6 @@ from app.models.knowledge_synthesis import KnowledgeSynthesis, KnowledgeSynthesi
 from app.schemas.knowledge_synthesis import AutoKnowledgeSyncItem, AutoKnowledgeSyncResponse, KnowledgeSynthesisRequest
 from app.schemas.knowledge_synthesis_apply import KnowledgeSynthesisValidationRequest
 from app.services.knowledge_duplicate_service import (
-    RULE_LIKE_KNOWLEDGE_TYPES,
     assess_synthesized_unit_material_change,
     find_duplicate_active_knowledge,
     reuse_existing_knowledge_for_duplicate,
@@ -231,66 +230,131 @@ def _mark_review_required(
     db.refresh(candidate)
 
 # --- Auto-operation normalization and safety ---
-def _normalize_auto_operation(db: Session, synthesis: KnowledgeSynthesis) -> str | None:
+def _normalize_auto_operation(
+    db: Session,
+    synthesis: KnowledgeSynthesis,
+    candidate: KnowledgeCandidate | None = None,
+) -> str | None:
     """
-    AI operation 중 Backend가 안전하게 의미를 확정할 수 있는
-    경우만 Auto Pipeline에서 정규화한다.
+    Auto Pipeline에서 안전하게 확정 가능한 operation만 보정한다.
 
-    원본 AI 응답(raw_response)은 수정하지 않는다.
-
-    1. ENRICH / SUPERSEDE + target 누락
-       - existing=0 -> 신규 지식이므로 MERGE
-       - existing=1 -> 유일한 existing을 target으로 채움
-
-    2. MERGE + existing Knowledge 1개 + proposal 1개
-       - Auto path가 이미 관련 Knowledge 1개만 선별해 AI에 전달한
-         상태이므로, 병렬 독립 v1을 만드는 대신 기존 Knowledge의
-         다음 Version인 ENRICH로 정규화
-       - 단, Duplicate는 이 단계보다 앞에서 기존 Knowledge 재사용으로
-         종료되므로 실제 새 정보가 남은 경우에만 version update가 된다.
-
-    MERGE + existing 여러 개, proposal 여러 개 등
-    의미가 모호한 경우는 여기서 보정하지 않고 Guardrail로
-    넘겨 REVIEW_REQUIRED 처리한다.
+    핵심 정책:
+    - ENRICH/SUPERSEDE는 동일 Knowledge Type의 1:1 version chain에서만
+      target 누락을 자동 보완한다.
+    - MERGE를 ENRICH로 승격하지 않는다. MERGE는 독립 Knowledge 생성
+      의미로 유지한다.
     """
-    existing_ids = _get_requested_existing_knowledge_ids(synthesis)
-    target_ids = _to_uuid_list(synthesis.target_knowledge_ids)
-    proposal_count = _get_synthesis_unit_count(db=db, synthesis=synthesis)
-    if synthesis.operation in {'ENRICH', 'SUPERSEDE'}:
-        if target_ids:
-            return None
-        if len(existing_ids) == 0:
-            original_operation = synthesis.operation
-            synthesis.operation = 'MERGE'
-            db.flush()
-            detail = f'Auto-normalized synthesis operation {original_operation} -> MERGE because no existing knowledge was supplied'
-            logger.info('%s synthesis_id=%s', detail, synthesis.synthesis_id)
-            return detail
-        if len(existing_ids) == 1:
-            target_id = existing_ids[0]
-            synthesis.target_knowledge_ids = [str(target_id)]
-            db.flush()
-            detail = f'Auto-filled missing target for {synthesis.operation} with the only supplied existing knowledge {target_id}'
-            logger.info('%s synthesis_id=%s', detail, synthesis.synthesis_id)
-            return detail
+
+    if candidate is None:
+        candidate = (
+            db.query(KnowledgeCandidate)
+            .filter(
+                KnowledgeCandidate.candidate_id
+                == synthesis.candidate_id
+            )
+            .first()
+        )
+
+    existing_ids = _get_requested_existing_knowledge_ids(
+        synthesis
+    )
+    target_ids = _to_uuid_list(
+        synthesis.target_knowledge_ids
+    )
+    proposals = _get_synthesis_units(
+        db=db,
+        synthesis=synthesis,
+    )
+
+    if synthesis.operation not in {
+        "ENRICH",
+        "SUPERSEDE",
+    }:
         return None
-    if synthesis.operation == 'MERGE':
-        if len(existing_ids) == 1 and proposal_count == 1 and (len(target_ids) <= 1):
-            existing_id = existing_ids[0]
-            if target_ids and target_ids[0] != existing_id:
-                return None
-            synthesis.operation = 'ENRICH'
-            synthesis.target_knowledge_ids = [str(existing_id)]
-            db.flush()
-            detail = f'Auto-normalized synthesis operation MERGE -> ENRICH because exactly one existing knowledge and one synthesized unit were supplied; target={existing_id}'
-            logger.info('%s synthesis_id=%s', detail, synthesis.synthesis_id)
-            return detail
+
+    if target_ids:
+        return None
+
+    if len(existing_ids) == 0:
+        original_operation = synthesis.operation
+        synthesis.operation = "MERGE"
+        synthesis.target_knowledge_ids = []
+        db.flush()
+
+        detail = (
+            "Auto-normalized synthesis operation "
+            f"{original_operation} -> MERGE because no existing "
+            "knowledge was supplied"
+        )
+        logger.info(
+            "%s synthesis_id=%s",
+            detail,
+            synthesis.synthesis_id,
+        )
+        return detail
+
+    if (
+        len(existing_ids) == 1
+        and len(proposals) == 1
+    ):
+        target = (
+            db.query(KnowledgeUnit)
+            .filter(
+                KnowledgeUnit.knowledge_id
+                == existing_ids[0]
+            )
+            .first()
+        )
+        proposal = proposals[0]
+
+        if target is None:
+            return None
+
+        same_type_chain = (
+            candidate is not None
+            and candidate.knowledge_type
+            == target.knowledge_type
+            == proposal.knowledge_type
+        )
+
+        if not same_type_chain:
+            return None
+
+        synthesis.target_knowledge_ids = [
+            str(target.knowledge_id)
+        ]
+        db.flush()
+
+        detail = (
+            "Auto-filled missing target for "
+            f"{synthesis.operation} with the only supplied "
+            "same-type existing knowledge "
+            f"{target.knowledge_id}"
+        )
+        logger.info(
+            "%s synthesis_id=%s",
+            detail,
+            synthesis.synthesis_id,
+        )
+        return detail
+
     return None
 
 def _check_auto_apply_safety(
     db: Session,
     synthesis: KnowledgeSynthesis,
+    candidate: KnowledgeCandidate | None = None,
 ) -> tuple[bool, str | None]:
+    if candidate is None:
+        candidate = (
+            db.query(KnowledgeCandidate)
+            .filter(
+                KnowledgeCandidate.candidate_id
+                == synthesis.candidate_id
+            )
+            .first()
+        )
+
     targets = _get_synthesis_targets(
         db=db,
         synthesis=synthesis,
@@ -336,33 +400,30 @@ def _check_auto_apply_safety(
         target = targets[0]
         proposal = proposals[0]
 
-        # EXCEPTION -> PRINCIPLE, FAILURE_LESSON -> DECISION_RULE처럼
-        # Knowledge family 자체가 바뀌는 version update는 Root가
-        # 다른 지식을 흡수하는 mega-knowledge가 될 수 있으므로
-        # 자동 적용하지 않는다.
-        if target.knowledge_type != proposal.knowledge_type:
-            target_rule_like = (
-                target.knowledge_type
-                in RULE_LIKE_KNOWLEDGE_TYPES
+        # Version chain은 Candidate / target / proposal의 type이 모두
+        # 같을 때만 허용한다. Legacy PENDING synthesis도 여기서 차단한다.
+        if (
+            candidate is None
+            or not (
+                candidate.knowledge_type
+                == target.knowledge_type
+                == proposal.knowledge_type
             )
-            proposal_rule_like = (
-                proposal.knowledge_type
-                in RULE_LIKE_KNOWLEDGE_TYPES
+        ):
+            candidate_type = (
+                candidate.knowledge_type
+                if candidate is not None
+                else "UNKNOWN"
             )
-
-            if not (
-                target_rule_like
-                and proposal_rule_like
-            ):
-                return (
-                    False,
-                    (
-                        'Cross-family knowledge_type version update '
-                        'requires manual review: '
-                        f'{target.knowledge_type} -> '
-                        f'{proposal.knowledge_type}'
-                    ),
-                )
+            return (
+                False,
+                (
+                    'Cross-type knowledge version update is not allowed: '
+                    f'candidate={candidate_type}, '
+                    f'target={target.knowledge_type}, '
+                    f'proposal={proposal.knowledge_type}'
+                ),
+            )
 
     if operation == 'ADD_EXCEPTION':
         if len(targets) != 1 or proposal_count != 1:
@@ -491,10 +552,10 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
             else:
                 synthesis = _create_auto_synthesis(db=db, mission_id=analysis.mission_id, candidate=candidate)
             synthesis_id = synthesis.synthesis_id
-            normalization_detail = _normalize_auto_operation(db=db, synthesis=synthesis)
+            normalization_detail = _normalize_auto_operation(db=db, synthesis=synthesis, candidate=candidate)
             if normalization_detail:
                 detail_messages.append(normalization_detail)
-            safe, safety_reason = _check_auto_apply_safety(db=db, synthesis=synthesis)
+            safe, safety_reason = _check_auto_apply_safety(db=db, synthesis=synthesis, candidate=candidate)
             if not safe:
                 retried_synthesis, retry_detail = _retry_unsafe_synthesis(db=db, mission_id=analysis.mission_id, candidate=candidate, synthesis=synthesis)
                 if retried_synthesis is not None:
@@ -502,10 +563,10 @@ def sync_analysis_to_knowledge(db: Session, analysis_id: uuid.UUID) -> AutoKnowl
                     synthesis_id = synthesis.synthesis_id
                     if retry_detail:
                         detail_messages.append(retry_detail)
-                    normalization_detail = _normalize_auto_operation(db=db, synthesis=synthesis)
+                    normalization_detail = _normalize_auto_operation(db=db, synthesis=synthesis, candidate=candidate)
                     if normalization_detail:
                         detail_messages.append(normalization_detail)
-                    safe, safety_reason = _check_auto_apply_safety(db=db, synthesis=synthesis)
+                    safe, safety_reason = _check_auto_apply_safety(db=db, synthesis=synthesis, candidate=candidate)
             if not safe:
                 review_reason = (
                     safety_reason
