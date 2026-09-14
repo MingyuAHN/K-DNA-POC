@@ -227,6 +227,30 @@ class Validation(Base):
         nullable=True,
     )
 
+    # Candidate extraction confidence와 분리된
+    # Validation Confidence 전용 값이다.
+    # HUMAN validation row와의 하위 호환을 위해 nullable로 유지한다.
+    confidence_score: Mapped[
+        float | None
+    ] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+    )
+
+    dimension_scores: Mapped[
+        dict[str, Any] | None
+    ] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    method_version: Mapped[
+        str | None
+    ] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

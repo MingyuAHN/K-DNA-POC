@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -18,7 +19,14 @@ from app.schemas.knowledge_review import (
     KnowledgeReviewCandidateListResponse,
     KnowledgeReviewEvidenceItem,
 )
+from app.services.knowledge_validation_confidence_service import (
+    assess_candidate_validation_confidence,
+    get_latest_validation_confidence_map,
+)
 from app.services.mission_service import get_mission
+
+
+logger = logging.getLogger(__name__)
 
 
 EDITABLE_CANDIDATE_FIELDS = {
@@ -262,6 +270,26 @@ def edit_review_candidate(
             ),
         )
 
+    validation = None
+
+    try:
+        validation = assess_candidate_validation_confidence(
+            db=db,
+            candidate_id=candidate.candidate_id,
+        )
+    except Exception as exc:
+        # Candidate edit 자체는 이미 정상 반영되었으므로
+        # Validation Confidence 재계산 실패로 Edit를 실패시키지 않는다.
+        db.rollback()
+        logger.exception(
+            (
+                "Validation confidence refresh failed after "
+                "candidate edit candidate_id=%s error=%s"
+            ),
+            candidate.candidate_id,
+            str(exc),
+        )
+
     return KnowledgeCandidateEditResponse(
         candidate_id=candidate.candidate_id,
         analysis_id=candidate.analysis_id,
@@ -272,6 +300,21 @@ def edit_review_candidate(
         rationale=candidate.rationale,
         exception=candidate.exception,
         validation_status=candidate.validation_status,
+        validation_confidence=(
+            _float_or_none(validation.confidence_score)
+            if validation is not None
+            else None
+        ),
+        validation_breakdown=(
+            validation.dimension_scores
+            if validation is not None
+            else None
+        ),
+        validation_method_version=(
+            validation.method_version
+            if validation is not None
+            else None
+        ),
         review_status=(
             candidate.review_status
             or "REVIEW_REQUIRED"
@@ -337,6 +380,13 @@ def get_mission_review_candidates(
         candidate.candidate_id
         for candidate, _ in rows
     ]
+
+    validation_by_candidate = (
+        get_latest_validation_confidence_map(
+            db=db,
+            candidate_ids=candidate_ids,
+        )
+    )
 
     source_message_ids = list(
         {
@@ -427,6 +477,10 @@ def get_mission_review_candidates(
             analysis.source_message_id
         )
 
+        validation = validation_by_candidate.get(
+            candidate.candidate_id
+        )
+
         evidence = None
 
         if source_message is not None:
@@ -459,6 +513,21 @@ def get_mission_review_candidates(
                 ),
                 confidence_score=_float_or_none(
                     candidate.confidence_score
+                ),
+                validation_confidence=(
+                    _float_or_none(validation.confidence_score)
+                    if validation is not None
+                    else None
+                ),
+                validation_breakdown=(
+                    validation.dimension_scores
+                    if validation is not None
+                    else None
+                ),
+                validation_method_version=(
+                    validation.method_version
+                    if validation is not None
+                    else None
                 ),
                 validation_status=(
                     candidate.validation_status

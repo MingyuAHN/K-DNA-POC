@@ -45,7 +45,15 @@ class KnowledgeReviewCandidateItem(BaseModel):
     exception: str | None = None
 
     novelty_score: float | None = None
+
+    # AI Candidate extraction confidence.
     confidence_score: float | None = None
+
+    # Evidence/Context 기반 Validation Confidence.
+    validation_confidence: float | None = None
+    validation_breakdown: dict[str, float] | None = None
+    validation_method_version: str | None = None
+
     validation_status: str
 
     review_status: str
@@ -95,6 +103,11 @@ class KnowledgeCandidateEditResponse(BaseModel):
     exception: str | None = None
 
     validation_status: str
+
+    validation_confidence: float | None = None
+    validation_breakdown: dict[str, float] | None = None
+    validation_method_version: str | None = None
+
     review_status: str
     review_reason: str | None = None
     review_synthesis_id: uuid.UUID | None = None

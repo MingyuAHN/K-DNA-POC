@@ -32,6 +32,9 @@ from app.services.interview_service import (
     add_interview_message,
     get_interview,
 )
+from app.services.knowledge_validation_confidence_service import (
+    assess_mission_validation_confidence,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -284,7 +287,52 @@ def run_interview_turn(
             )
 
         # -----------------------------------------------------
-        # 9. Knowledge Sync
+        # 9. Validation Confidence
+        #
+        # Candidate extraction confidence와 별도로, 설계서의 7개 axis를
+        # PoC_V1 deterministic policy로 계산하여 validation history에
+        # 저장한다.
+        #
+        # 다른 Expert의 Candidate가 새로 들어오면 Cross-Expert
+        # Agreement가 달라질 수 있으므로 동일 Mission의 현재 CANDIDATE를
+        # 함께 재평가한다. 동일 결과는 새 history row를 만들지 않는다.
+        #
+        # 이 후처리가 실패해도 Interview Turn 자체는 보존한다.
+        # -----------------------------------------------------
+        try:
+            validation_rows = (
+                assess_mission_validation_confidence(
+                    db=db,
+                    mission_id=interview.mission_id,
+                )
+            )
+
+            logger.info(
+                (
+                    "Validation confidence assessment completed "
+                    "analysis_id=%s mission_id=%s assessed=%s"
+                ),
+                analysis.analysis_id,
+                interview.mission_id,
+                len(validation_rows),
+            )
+
+        except Exception as validation_exc:
+            db.rollback()
+
+            logger.exception(
+                (
+                    "Validation confidence assessment failed "
+                    "but interview turn will continue. "
+                    "analysis_id=%s interview_id=%s error=%s"
+                ),
+                analysis.analysis_id,
+                interview_id,
+                str(validation_exc),
+            )
+
+        # -----------------------------------------------------
+        # 10. Knowledge Sync
         #
         # 이번 Turn에서 생성된 Candidate들을 대상으로:
         #
@@ -381,7 +429,7 @@ def run_interview_turn(
             )
 
         # -----------------------------------------------------
-        # 10. Frontend 응답
+        # 11. Frontend 응답
         #
         # Conflict Source는 Backend provenance 표준으로:
         #
