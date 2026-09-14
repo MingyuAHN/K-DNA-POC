@@ -1125,7 +1125,7 @@ function EditForm({
 
           <div className="space-y-4">
             <EditField
-              label="IF"
+              label="조건"
               description="여러 조건은 줄바꿈으로 구분합니다."
             >
               <textarea
@@ -1141,7 +1141,7 @@ function EditForm({
               />
             </EditField>
 
-            <EditField label="THEN">
+            <EditField label="결과">
               <textarea
                 value={thenRule}
                 onChange={(event) =>
@@ -1156,7 +1156,7 @@ function EditForm({
             </EditField>
 
             <EditField
-              label="UNLESS"
+              label="예외"
               description="예외가 없으면 비워두세요."
             >
               <textarea

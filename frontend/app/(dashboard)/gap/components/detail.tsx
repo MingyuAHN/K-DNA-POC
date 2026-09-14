@@ -89,25 +89,14 @@ export default function GapDetail({
                 selectedTopic
               )}
             </h2>
-
-            <p className="mt-1 text-xs font-semibold text-slate-500">
-              총 {sortedGaps.length}건의 Gap 탐지 이력
-            </p>
           </div>
 
           {/* 최신 Gap */}
           <div className="rounded-[22px] border border-blue-100 bg-blue-50/40 p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black text-blue-600">
-                  최신 Gap
-                </p>
-
-                <p className="mt-0.5 text-xs font-semibold text-slate-400">
-                  가장 최근에 탐지된 Gap입니다.
-                </p>
               </div>
-
+              
               {latestGap.created_at && (
                 <div className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-400">
                   <Clock3 className="h-3.5 w-3.5" />
