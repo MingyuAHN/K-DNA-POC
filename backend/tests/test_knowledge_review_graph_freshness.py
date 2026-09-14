@@ -155,8 +155,12 @@ class KnowledgeReviewGraphFreshnessTest(unittest.TestCase):
             apply_service.validate_and_apply_synthesis
         )
 
+        # After the central Graph Policy refactor, no-op reuse is
+        # finalized through _finalize_plain_reuse() instead of the
+        # old inline "Knowledge version inflation suppressed" branch.
+        # It must still return before any sibling-stale invalidation.
         noop_return_index = source.find(
-            "Knowledge version inflation suppressed"
+            "return _finalize_plain_reuse("
         )
         sibling_guard_index = source.find(
             "_mark_waiting_syntheses_stale_after_graph_change("
@@ -167,6 +171,14 @@ class KnowledgeReviewGraphFreshnessTest(unittest.TestCase):
         self.assertLess(
             noop_return_index,
             sibling_guard_index,
+        )
+
+        # Non-plain reuse paths may continue only when a relation is
+        # actually added. Waiting syntheses must therefore be marked
+        # stale only when the Graph really changed.
+        self.assertIn(
+            "and graph_changed",
+            source,
         )
 
 

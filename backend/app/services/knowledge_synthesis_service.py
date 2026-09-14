@@ -37,6 +37,9 @@ from app.schemas.knowledge_synthesis import (
     SynthesisDecisionRule,
     SynthesizedKnowledgeUnit,
 )
+from app.services.knowledge_graph_policy_service import (
+    assess_atomic_version_identity,
+)
 
 
 ACTIVE_KNOWLEDGE_STATUSES = {
@@ -327,6 +330,197 @@ def _normalize_exception_synthesis(
         reason,
     )
 
+
+
+def _candidate_exception_field_to_synthesized_unit(
+    candidate: KnowledgeCandidate,
+) -> SynthesizedKnowledgeUnit:
+    """
+    PRINCIPLE/DECISION_RULE Candidate의 ``exception`` 필드를
+    parent Knowledge 안에 흡수하지 않고 독립 EXCEPTION unit으로
+    분리한다.
+
+    phase/time은 parent statement의 평상시 맥락일 수 있으므로 그대로
+    복사하지 않는다. exception statement 자체가 장애/예외 조건을
+    표현하며, duplicate detector가 기존 EXCEPTION과 비교할 수 있도록
+    domain/system/scope와 명시적으로 드러난 tag만 보존한다.
+    """
+
+    statement = (candidate.exception or "").strip()
+
+    context = dict(candidate.context or {})
+    context["phase"] = None
+    context["time"] = None
+    context["constraints"] = []
+
+    tags = [
+        value
+        for value in context.get("tags", [])
+        if isinstance(value, str) and value.strip()
+    ]
+
+    derived_tags: list[str] = []
+    compact = statement.replace(" ", "")
+
+    if "장애" in compact:
+        derived_tags.append("장애 대응")
+
+    if "예외" in compact or "허용" in compact:
+        derived_tags.append("예외 접근")
+
+    if (
+        "타서비스" in compact
+        and ("DB" in statement or "데이터베이스" in compact)
+    ):
+        derived_tags.append("서비스 간 데이터베이스 접근")
+
+    for tag in derived_tags:
+        if tag not in tags:
+            tags.append(tag)
+
+    context["tags"] = tags
+
+    return SynthesizedKnowledgeUnit(
+        statement=statement,
+        type="EXCEPTION",
+        context=SynthesisContext.model_validate(context),
+        decision_rule=None,
+        rationale=(
+            "Candidate의 exception 필드를 독립 EXCEPTION "
+            "Knowledge Unit으로 분리한다."
+        ),
+        exception=None,
+        novelty_score=(
+            float(candidate.novelty_score)
+            if candidate.novelty_score is not None
+            else 0.0
+        ),
+        confidence_score=(
+            float(candidate.confidence_score)
+            if candidate.confidence_score is not None
+            else 0.0
+        ),
+        validation_status=candidate.validation_status,
+    )
+
+
+def _normalize_add_exception_payload(
+    candidate: KnowledgeCandidate,
+    related_knowledge: list[KnowledgeUnit],
+    ai_result: KnowledgeSynthesisAIResponse,
+) -> tuple[KnowledgeSynthesisAIResponse, str | None]:
+    """
+    ADD_EXCEPTION은 반드시 ``parent --HAS_EXCEPTION--> EXCEPTION``
+    구조를 만들도록 정규화한다.
+
+    AI가 parent PRINCIPLE 자체를 synthesized unit으로 반환하는 경우
+    그대로 Apply하면 ``PRINCIPLE --HAS_EXCEPTION--> PRINCIPLE`` 같은
+    잘못된 Graph가 생긴다. Candidate의 exception 필드가 존재하면 그
+    텍스트를 독립 EXCEPTION unit으로 분리한다.
+
+    exception 텍스트가 없거나 target이 호환 parent가 아니면 여기서
+    억지로 추론하지 않는다. Apply guard가 해당 snapshot을 STALE 처리한다.
+    """
+
+    if ai_result.operation != "ADD_EXCEPTION":
+        return ai_result, None
+
+    exception_text = (candidate.exception or "").strip()
+
+    # ADD_EXCEPTION은 Candidate 자체가 EXCEPTION이거나,
+    # PRINCIPLE/DECISION_RULE Candidate가 명시적인 exception payload를
+    # 갖고 있을 때만 허용한다.
+    #
+    # 실제 Review Queue 회귀:
+    #   Candidate(PRINCIPLE): 직접 조회 시 read-only + 최소 범위
+    #   candidate.exception: None
+    #   AI: 기존 평상시 원칙의 ADD_EXCEPTION으로 과도하게 해석
+    #
+    # 이 경우 Candidate의 atomic 의미는 '예외 허용'이 아니라
+    # '예외가 발생했을 때 지켜야 할 접근 통제 원칙'이다. AI가 새로
+    # 만들어 낸 exception 문구를 Graph에 추가하지 않고 Candidate 자체를
+    # 독립 MERGE로 보존한다.
+    if (
+        candidate.knowledge_type != "EXCEPTION"
+        and not exception_text
+    ):
+        reason = (
+            "Backend ADD_EXCEPTION eligibility policy applied: "
+            "a non-EXCEPTION Candidate without an explicit exception "
+            "payload cannot be converted into ADD_EXCEPTION; the "
+            "Candidate is preserved as one independent Knowledge Unit."
+        )
+
+        return (
+            KnowledgeSynthesisAIResponse(
+                operation="MERGE",
+                target_knowledge_ids=[],
+                synthesized_knowledge_units=[
+                    _candidate_to_synthesized_unit(candidate)
+                ],
+                relations=[],
+                reason=reason,
+            ),
+            reason,
+        )
+
+    if (
+        len(ai_result.target_knowledge_ids) != 1
+        or len(ai_result.synthesized_knowledge_units) != 1
+    ):
+        return ai_result, None
+
+    proposal = ai_result.synthesized_knowledge_units[0]
+
+    if proposal.type == "EXCEPTION":
+        return ai_result, None
+
+    if not exception_text:
+        return ai_result, None
+
+    related_by_id = {
+        row.knowledge_id: row
+        for row in related_knowledge
+    }
+    target_id = ai_result.target_knowledge_ids[0]
+    target = related_by_id.get(target_id)
+
+    if (
+        target is None
+        or target.knowledge_type not in EXCEPTION_PARENT_TYPES
+    ):
+        return ai_result, None
+
+    reason = (
+        "Backend ADD_EXCEPTION atomic policy applied: the parent "
+        "Candidate statement is not duplicated into a new parent unit; "
+        "its exception field is preserved as an independent EXCEPTION "
+        "Knowledge Unit linked with HAS_EXCEPTION."
+    )
+
+    return (
+        KnowledgeSynthesisAIResponse(
+            operation="ADD_EXCEPTION",
+            target_knowledge_ids=[target_id],
+            synthesized_knowledge_units=[
+                _candidate_exception_field_to_synthesized_unit(candidate)
+            ],
+            relations=[
+                ProposedSynthesisRelation(
+                    synthesized_index=0,
+                    target_knowledge_id=target_id,
+                    relation="HAS_EXCEPTION",
+                    reason=(
+                        "The exception is preserved as a separate "
+                        "EXCEPTION Knowledge Unit under the existing "
+                        "parent Knowledge."
+                    ),
+                )
+            ],
+            reason=reason,
+        ),
+        reason,
+    )
 
 def _attach_review_synthesis_if_waiting(
     candidate: KnowledgeCandidate,
@@ -631,7 +825,36 @@ def _normalize_atomic_version_policy(
                 )
 
                 if same_type_chain:
-                    return ai_result, None
+                    identity = assess_atomic_version_identity(
+                        candidate=candidate,
+                        target=target,
+                    )
+
+                    if identity.same_atomic_unit:
+                        return ai_result, None
+
+                    reason = (
+                        "Backend atomic version policy applied: "
+                        "same-type version proposal was converted to "
+                        "independent knowledge because the Candidate and "
+                        "target do not represent the same atomic context. "
+                        + identity.reason
+                    )
+
+                    return (
+                        KnowledgeSynthesisAIResponse(
+                            operation="MERGE",
+                            target_knowledge_ids=[],
+                            synthesized_knowledge_units=[
+                                _candidate_to_synthesized_unit(
+                                    candidate
+                                )
+                            ],
+                            relations=[],
+                            reason=reason,
+                        ),
+                        reason,
+                    )
 
                 relations: list[
                     ProposedSynthesisRelation
@@ -967,6 +1190,17 @@ def synthesize_candidate(
 
     if exception_policy_reason is not None:
         policy_reasons.append(exception_policy_reason)
+
+    ai_result, add_exception_policy_reason = (
+        _normalize_add_exception_payload(
+            candidate=candidate,
+            related_knowledge=related_knowledge,
+            ai_result=ai_result,
+        )
+    )
+
+    if add_exception_policy_reason is not None:
+        policy_reasons.append(add_exception_policy_reason)
 
     ai_result, atomic_policy_reason = (
         _normalize_atomic_version_policy(

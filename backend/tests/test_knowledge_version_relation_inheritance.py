@@ -183,11 +183,17 @@ class KnowledgeVersionRelationInheritanceTest(
             source,
         )
 
+        # The central Graph Policy refactor keeps relation inheritance
+        # in the canonical CREATE_VERSION path. The creation expression
+        # is now formatted directly instead of the old `new_knowledge = (`
+        # multiline style, so assert semantic ordering rather than a
+        # formatting artifact.
         create_index = source.find(
-            "new_knowledge = ("
+            "new_knowledge = _create_new_unit("
         )
         inherit_index = source.find(
-            helper_call
+            helper_call,
+            create_index,
         )
         applied_map_index = source.find(
             "applied_map[",

@@ -12,6 +12,7 @@ from app.services.knowledge_duplicate_service import (
     _is_exception_decision_semantic_noop,
     _is_exception_decision_strong_lexical_noop,
     _is_exception_decision_conditional_allowance_noop,
+    _is_same_type_exception_contained_lexical_duplicate,
     _is_semantic_duplicate,
     _tag_overlap_count,
     _types_are_exception_decision_noop_compatible,
@@ -870,6 +871,276 @@ class KnowledgeDuplicatePolarityTest(
             ),
             2,
         )
+
+
+    def test_add_exception_field_reuses_existing_exception_without_embedding(self):
+        knowledge = _knowledge(
+            (
+                "평상시에는 API 또는 이벤트를 통한 확인을 사용하되, "
+                "장애 대응 중 API나 이벤트를 통한 확인이 불가능하거나 "
+                "정상 경로를 기다리면 복구가 지연되는 긴급 상황에서는 "
+                "타 서비스 데이터베이스에 대한 읽기 직접 조회를 "
+                "공식적인 예외로 허용한다."
+            ),
+            context={
+                "tags": [
+                    "장애 대응",
+                    "예외 접근",
+                    "서비스 간 데이터베이스 접근",
+                ],
+                "phase": "운영 및 장애 대응",
+                "domain": "MSA Architecture",
+            },
+            knowledge_type="EXCEPTION",
+            exception=None,
+        )
+        knowledge.knowledge_id = uuid.uuid4()
+
+        candidate = _candidate(
+            (
+                "장애 대응 중 API나 이벤트만으로 확인하기 어렵거나 "
+                "정상 경로로 인해 복구가 지연되는 긴급 상황에서는 "
+                "일시적인 직접 읽기 조회를 예외적으로 허용한다."
+            ),
+            context={
+                "tags": [
+                    "장애 대응",
+                    "예외 접근",
+                    "서비스 간 데이터베이스 접근",
+                ],
+                "phase": None,
+                "domain": "MSA Architecture",
+            },
+            knowledge_type="EXCEPTION",
+            exception=None,
+        )
+
+        metrics = _build_metrics(
+            candidate=candidate,
+            knowledge=knowledge,
+        )
+
+        self.assertTrue(
+            _is_same_type_exception_contained_lexical_duplicate(
+                candidate=candidate,
+                knowledge=knowledge,
+                metrics=metrics,
+            )
+        )
+
+        class _FakeQuery:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def filter(self, *args, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return self.rows
+
+        class _FakeDB:
+            def query(self, *args, **kwargs):
+                return _FakeQuery([knowledge])
+
+        with patch(
+            "app.services.knowledge_duplicate_service._get_embedding_vectors",
+            side_effect=AssertionError(
+                "contained EXCEPTION duplicate must not require embedding"
+            ),
+        ):
+            match = find_duplicate_active_knowledge(
+                db=_FakeDB(),
+                mission_id=uuid.uuid4(),
+                candidate=candidate,
+            )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            match.knowledge.knowledge_id,
+            knowledge.knowledge_id,
+        )
+        self.assertEqual(
+            match.match_type,
+            "SAME_TYPE_EXCEPTION_CONTAINMENT",
+        )
+
+
+
+    def test_interview_smoke_principle_decision_type_drift_reuses_existing_without_embedding(self):
+        """
+        Final Interview smoke test regression.
+
+        The same normal-operation rule was extracted as DECISION_RULE while
+        the existing VERIFIED Knowledge is PRINCIPLE.  Surface wording differs
+        because the Candidate says "직접 조회하지 않고 API/Event" and the
+        existing Knowledge says "직접 조회보다 API/Event".
+
+        This is type drift + preference paraphrase, not new knowledge.
+        """
+        knowledge = _knowledge(
+            (
+                "평상시 서비스 간 데이터 접근은 데이터베이스 직접 조회보다 "
+                "API 또는 이벤트를 사용한다."
+            ),
+            context={
+                "tags": [
+                    "API",
+                    "이벤트",
+                    "서비스 간 통신",
+                ],
+                "time": "평상시",
+                "phase": "운영",
+                "scope": "평상시 운영",
+                "domain": "MSA Architecture",
+                "system": "서비스 간 데이터 접근",
+                "constraints": [
+                    "직접 데이터베이스 조회를 기본 접근 방식으로 사용하지 않음",
+                ],
+            },
+            knowledge_type="PRINCIPLE",
+            exception=None,
+        )
+        knowledge.knowledge_id = uuid.uuid4()
+
+        candidate = _candidate(
+            (
+                "평상시 서비스 간 데이터 조회는 다른 서비스의 데이터베이스를 "
+                "직접 조회하지 않고 API 또는 이벤트를 통해 처리한다."
+            ),
+            context={
+                "tags": [
+                    "API",
+                    "이벤트",
+                    "데이터베이스 직접 조회",
+                    "서비스 간 통신",
+                ],
+                "time": "평상시",
+                "phase": None,
+                "scope": "서비스 간 데이터 접근",
+                "domain": "MSA Architecture",
+                "system": "서비스 간 데이터 조회",
+                "constraints": [
+                    "다른 서비스의 데이터베이스를 직접 조회하지 않음",
+                ],
+            },
+            knowledge_type="DECISION_RULE",
+            exception=None,
+        )
+
+        class _FakeQuery:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def filter(self, *args, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return self.rows
+
+        class _FakeDB:
+            def query(self, *args, **kwargs):
+                return _FakeQuery([knowledge])
+
+        with patch(
+            "app.services.knowledge_duplicate_service._get_embedding_vectors",
+            side_effect=AssertionError(
+                "strong PRINCIPLE/DECISION_RULE type drift no-op must not "
+                "require embedding"
+            ),
+        ):
+            match = find_duplicate_active_knowledge(
+                db=_FakeDB(),
+                mission_id=uuid.uuid4(),
+                candidate=candidate,
+            )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            match.knowledge.knowledge_id,
+            knowledge.knowledge_id,
+        )
+        self.assertEqual(
+            match.match_type,
+            "PRINCIPLE_DECISION_TYPE_DRIFT_NOOP",
+        )
+
+    def test_principle_decision_type_drift_does_not_merge_opposite_preference(self):
+        """
+        The narrow type-drift fallback must not collapse a genuinely opposite
+        rule merely because the vocabulary, tags, and time context overlap.
+        """
+        knowledge = _knowledge(
+            (
+                "평상시 서비스 간 데이터 접근은 데이터베이스 직접 조회보다 "
+                "API 또는 이벤트를 사용한다."
+            ),
+            context={
+                "tags": [
+                    "API",
+                    "이벤트",
+                    "서비스 간 통신",
+                ],
+                "time": "평상시",
+                "phase": "운영",
+                "domain": "MSA Architecture",
+            },
+            knowledge_type="PRINCIPLE",
+        )
+        knowledge.knowledge_id = uuid.uuid4()
+
+        candidate = _candidate(
+            (
+                "평상시 서비스 간 데이터 조회는 API나 이벤트를 사용하지 않고 "
+                "다른 서비스 데이터베이스를 직접 조회한다."
+            ),
+            context={
+                "tags": [
+                    "API",
+                    "이벤트",
+                    "서비스 간 통신",
+                    "데이터베이스 직접 조회",
+                ],
+                "time": "평상시",
+                "phase": None,
+                "domain": "MSA Architecture",
+            },
+            knowledge_type="DECISION_RULE",
+        )
+
+        class _FakeQuery:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def filter(self, *args, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return self.rows
+
+        class _FakeDB:
+            def query(self, *args, **kwargs):
+                return _FakeQuery([knowledge])
+
+        with patch(
+            "app.services.knowledge_duplicate_service._get_embedding_vectors",
+            return_value={},
+        ):
+            match = find_duplicate_active_knowledge(
+                db=_FakeDB(),
+                mission_id=uuid.uuid4(),
+                candidate=candidate,
+            )
+
+        self.assertIsNone(match)
 
 
 if __name__ == "__main__":

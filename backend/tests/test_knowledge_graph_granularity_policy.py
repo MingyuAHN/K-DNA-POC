@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import app.services.auto_knowledge_sync_service as auto_service
 import app.services.knowledge_synthesis_apply_service as apply_service
+import app.services.knowledge_graph_policy_service as graph_policy_service
 from app.schemas.knowledge_synthesis import (
     KnowledgeSynthesisAIResponse,
     ProposedSynthesisRelation,
@@ -12,6 +13,7 @@ from app.schemas.knowledge_synthesis import (
     SynthesizedKnowledgeUnit,
 )
 from app.services.knowledge_synthesis_service import (
+    _normalize_add_exception_payload,
     _normalize_atomic_version_policy,
 )
 
@@ -42,11 +44,13 @@ def _candidate(
 def _knowledge(
     knowledge_type: str,
     statement: str,
+    context: dict | None = None,
 ):
     return SimpleNamespace(
         knowledge_id=uuid.uuid4(),
         knowledge_type=knowledge_type,
         statement=statement,
+        context=context or {},
     )
 
 
@@ -152,6 +156,114 @@ class KnowledgeGraphGranularityPolicyTest(unittest.TestCase):
         self.assertEqual(normalized.operation, "ENRICH")
         self.assertIsNone(reason)
 
+    def test_same_type_enrich_with_different_atomic_scope_becomes_merge(self):
+        """
+        Same type is not enough for a version chain.  The actual Review Queue
+        case tries to ENRICH a read-exception with an independent write-ban.
+        Synthesis normalization must preserve the Candidate atom as an
+        independent MERGE before the snapshot reaches Human Review.
+        """
+        candidate = _candidate(
+            "EXCEPTION",
+            (
+                "긴급 상황에서도 타 서비스 데이터베이스에 대해 "
+                "INSERT, UPDATE, DELETE와 같은 변경 작업을 직접 "
+                "수행하지 않는다."
+            ),
+        )
+        candidate.context = {
+            "domain": "MSA Architecture",
+            "phase": "운영 및 장애 대응",
+            "system": "타 서비스 데이터베이스 접근",
+            "scope": "데이터 변경 작업",
+            "time": "긴급 장애 대응 중",
+            "constraints": [
+                "INSERT 금지",
+                "UPDATE 금지",
+                "DELETE 금지",
+            ],
+            "tags": ["쓰기 금지", "데이터 무결성"],
+        }
+        candidate.exception = (
+            "긴급 상황에서도 데이터 변경 작업은 허용하지 않는다."
+        )
+
+        target = _knowledge(
+            "EXCEPTION",
+            (
+                "장애 대응 중 API나 이벤트를 통한 확인이 불가능한 "
+                "긴급 상황에서는 타 서비스 데이터베이스의 읽기 "
+                "직접 조회를 예외적으로 허용한다."
+            ),
+            context={
+                "domain": "MSA Architecture",
+                "phase": "운영 및 장애 대응",
+                "system": "타 서비스 데이터베이스 접근",
+                "scope": "읽기 조회",
+                "time": "장애 대응 중",
+                "constraints": [],
+                "tags": ["장애 대응", "예외 접근"],
+            },
+        )
+
+        ai_result = KnowledgeSynthesisAIResponse(
+            operation="ENRICH",
+            target_knowledge_ids=[target.knowledge_id],
+            synthesized_knowledge_units=[
+                SynthesizedKnowledgeUnit(
+                    statement=(
+                        "장애 중 직접 읽기 조회는 허용할 수 있지만 "
+                        "INSERT, UPDATE, DELETE 같은 직접 변경 작업은 "
+                        "수행하지 않는다."
+                    ),
+                    type="EXCEPTION",
+                    context=SynthesisContext(
+                        domain="MSA Architecture",
+                        phase="운영 및 장애 대응",
+                        system="타 서비스 데이터베이스 접근",
+                        scope="읽기 조회 및 데이터 변경 작업",
+                        time="장애 대응 중",
+                    ),
+                    decision_rule=None,
+                    rationale="AI enrich",
+                    exception=(
+                        "직접 데이터 변경 작업은 허용되지 않는다."
+                    ),
+                    novelty_score=0.91,
+                    confidence_score=0.99,
+                    validation_status="CANDIDATE",
+                )
+            ],
+            relations=[
+                ProposedSynthesisRelation(
+                    synthesized_index=0,
+                    target_knowledge_id=target.knowledge_id,
+                    relation="REFINES",
+                    reason="AI enrich",
+                )
+            ],
+            reason="AI enrich",
+        )
+
+        normalized, reason = _normalize_atomic_version_policy(
+            candidate=candidate,
+            related_knowledge=[target],
+            ai_result=ai_result,
+        )
+
+        self.assertEqual(normalized.operation, "MERGE")
+        self.assertEqual(normalized.target_knowledge_ids, [])
+        self.assertEqual(normalized.relations, [])
+        self.assertEqual(
+            normalized.synthesized_knowledge_units[0].statement,
+            candidate.statement,
+        )
+        self.assertEqual(
+            normalized.synthesized_knowledge_units[0].type,
+            "EXCEPTION",
+        )
+        self.assertIsNotNone(reason)
+
     def test_merge_with_existing_does_not_supersede_target(self):
         candidate = _candidate(
             "DECISION_RULE",
@@ -215,120 +327,338 @@ class KnowledgeGraphGranularityPolicyTest(unittest.TestCase):
             source,
         )
 
-    def test_apply_merge_does_not_supersede_targets(self):
+    def test_apply_uses_single_central_graph_policy(self):
         source = inspect.getsource(
             apply_service.validate_and_apply_synthesis
         )
-        merge_start = source.index(
-            'elif synthesis.operation == "MERGE":'
-        )
-        add_exception_start = source.index(
-            "# ADD_EXCEPTION",
-            merge_start,
-        )
-        merge_block = source[
-            merge_start:add_exception_start
-        ]
 
-        self.assertNotIn(
-            'relation_type="SUPERSEDES"',
-            merge_block,
+        self.assertIn(
+            "build_knowledge_graph_policy_plan(",
+            source,
         )
         self.assertNotIn(
-            'target.status = "SUPERSEDED"',
-            merge_block,
+            "find_duplicate_active_knowledge(",
+            source,
+        )
+        self.assertNotIn(
+            "assess_synthesized_unit_material_change(",
+            source,
+        )
+        self.assertIn(
+            "GraphApplyAction.CREATE_VERSION",
+            source,
+        )
+        self.assertIn(
+            "GraphApplyAction.CREATE_NEW",
+            source,
         )
 
+    def test_central_policy_merge_cannot_supersede_targets(self):
+        source = inspect.getsource(
+            graph_policy_service._validate_structure
+        )
+        relation_source = inspect.getsource(
+            graph_policy_service._validate_relation_shape
+        )
 
-    def test_apply_merge_rechecks_duplicate_before_create(self):
+        self.assertIn(
+            'operation == "MERGE"',
+            source,
+        )
+        self.assertIn(
+            "if targets:",
+            source,
+        )
+        self.assertIn(
+            'relation.relation_type == "SUPERSEDES"',
+            relation_source,
+        )
+
+    def test_central_policy_duplicate_gate_precedes_operation_actions(self):
+        source = inspect.getsource(
+            graph_policy_service.build_knowledge_graph_policy_plan
+        )
+
+        duplicate_index = source.index(
+            "duplicate_match = find_duplicate_active_knowledge("
+        )
+        version_index = source.index(
+            "if synthesis.operation in VERSION_OPERATIONS:"
+        )
+        create_new_index = source.rindex(
+            "action=GraphApplyAction.CREATE_NEW"
+        )
+
+        self.assertLess(duplicate_index, version_index)
+        self.assertLess(duplicate_index, create_new_index)
+        self.assertIn(
+            "The AI operation cannot bypass it.",
+            source,
+        )
+
+    def test_central_policy_version_material_guard_is_shared(self):
+        source = inspect.getsource(
+            graph_policy_service.build_knowledge_graph_policy_plan
+        )
+
+        self.assertIn(
+            "assess_synthesized_unit_material_change(",
+            source,
+        )
+        self.assertIn(
+            "GraphApplyAction.REUSE_TARGET",
+            source,
+        )
+        self.assertIn(
+            "GraphApplyAction.CREATE_VERSION",
+            source,
+        )
+
+    def test_central_policy_add_exception_reuses_child_and_keeps_relation(self):
+        source = inspect.getsource(
+            graph_policy_service.build_knowledge_graph_policy_plan
+        )
+
+        add_start = source.index(
+            'if synthesis.operation == "ADD_EXCEPTION":'
+        )
+        generic_duplicate_start = source.index(
+            "# Every other operation first passes",
+            add_start,
+        )
+        add_block = source[
+            add_start:generic_duplicate_start
+        ]
+
+        self.assertIn(
+            "_proposal_as_candidate(proposal)",
+            add_block,
+        )
+        self.assertIn(
+            'knowledge_type != "EXCEPTION"',
+            add_block,
+        )
+        self.assertEqual(
+            add_block.count(
+                "relations_to_apply=_build_relation_policy_plans("
+            ),
+            2,
+        )
+        self.assertNotIn(
+            "relations_to_apply=()",
+            add_block,
+        )
+
+    def test_add_exception_with_parent_proposal_becomes_atomic_exception(self):
+        candidate = _candidate(
+            "PRINCIPLE",
+            "평상시에는 타 서비스 데이터베이스를 직접 조회하지 않는다.",
+        )
+        candidate.exception = (
+            "장애 대응 중 API나 이벤트로 확인하기 어렵거나 정상 경로로 "
+            "인해 복구가 지연되는 긴급 상황에서는 일시적인 직접 읽기 "
+            "조회를 예외적으로 허용한다."
+        )
+        candidate.context = {
+            "domain": "MSA Architecture",
+            "phase": "평상시 운영",
+            "system": "타 서비스 데이터베이스 접근",
+            "scope": "서비스 간 데이터 조회",
+            "time": "평상시",
+            "constraints": [],
+            "tags": ["운영 원칙", "타 서비스 DB"],
+        }
+
+        target = _knowledge(
+            "PRINCIPLE",
+            "평상시 서비스 간 데이터 접근은 API 또는 이벤트를 사용한다.",
+        )
+
+        ai_result = KnowledgeSynthesisAIResponse(
+            operation="ADD_EXCEPTION",
+            target_knowledge_ids=[target.knowledge_id],
+            synthesized_knowledge_units=[
+                SynthesizedKnowledgeUnit(
+                    statement=candidate.statement,
+                    type="PRINCIPLE",
+                    context=SynthesisContext(
+                        domain="MSA Architecture",
+                        phase="평상시 운영",
+                    ),
+                    decision_rule=None,
+                    rationale=None,
+                    exception=candidate.exception,
+                    novelty_score=0.72,
+                    confidence_score=0.99,
+                    validation_status="CANDIDATE",
+                )
+            ],
+            relations=[
+                ProposedSynthesisRelation(
+                    synthesized_index=0,
+                    target_knowledge_id=target.knowledge_id,
+                    relation="HAS_EXCEPTION",
+                    reason="AI add exception",
+                )
+            ],
+            reason="AI add exception",
+        )
+
+        normalized, reason = _normalize_add_exception_payload(
+            candidate=candidate,
+            related_knowledge=[target],
+            ai_result=ai_result,
+        )
+
+        self.assertEqual(normalized.operation, "ADD_EXCEPTION")
+        self.assertEqual(
+            normalized.target_knowledge_ids,
+            [target.knowledge_id],
+        )
+        self.assertEqual(
+            normalized.synthesized_knowledge_units[0].type,
+            "EXCEPTION",
+        )
+        self.assertEqual(
+            normalized.synthesized_knowledge_units[0].statement,
+            candidate.exception,
+        )
+        self.assertIsNone(
+            normalized.synthesized_knowledge_units[0].exception
+        )
+        self.assertEqual(
+            normalized.relations[0].relation,
+            "HAS_EXCEPTION",
+        )
+        self.assertIsNotNone(reason)
+
+    def test_add_exception_without_explicit_exception_becomes_independent_merge(self):
         """
-        STALE 이후 수동 re-Synthesis된 독립 MERGE는 현재 Mission의
-        활성 Knowledge를 기준으로 duplicate/no-op를 다시 확인한 뒤
-        새 KnowledgeUnit을 생성해야 한다.
+        실제 Review Queue 회귀 테스트.
+
+        Candidate는 "직접 조회 시 read-only + 최소 범위"라는 독립
+        PRINCIPLE이고 exception 필드는 비어 있는데, AI가 기존 평상시
+        API/Event 원칙의 ADD_EXCEPTION으로 과도하게 해석한 경우다.
+
+        명시적인 exception payload가 없는 비-EXCEPTION Candidate는
+        AI가 생성한 예외 문구를 채택하지 않고 Candidate 자체를 독립
+        MERGE Knowledge로 보존해야 한다.
         """
+        candidate = _candidate(
+            "PRINCIPLE",
+            (
+                "타 서비스 데이터베이스 직접 조회는 읽기 전용 계정으로 "
+                "필요한 테이블과 데이터 범위에 한정해야 한다."
+            ),
+        )
+        candidate.exception = None
+        candidate.context = {
+            "domain": "MSA Architecture",
+            "phase": "운영 및 장애 대응",
+            "system": "타 서비스 데이터베이스 접근",
+            "scope": "읽기 조회",
+            "time": "장애 대응 중",
+            "constraints": [
+                "읽기 전용 계정 사용",
+                "필요한 테이블로 범위 제한",
+                "필요한 데이터로 범위 제한",
+            ],
+            "tags": [
+                "최소 권한",
+                "읽기 전용",
+                "데이터 범위 제한",
+            ],
+        }
+
+        target = _knowledge(
+            "PRINCIPLE",
+            (
+                "평상시 서비스 간 데이터 접근은 데이터베이스 직접 "
+                "조회보다 API 또는 이벤트를 사용한다."
+            ),
+        )
+
+        ai_result = KnowledgeSynthesisAIResponse(
+            operation="ADD_EXCEPTION",
+            target_knowledge_ids=[target.knowledge_id],
+            synthesized_knowledge_units=[
+                SynthesizedKnowledgeUnit(
+                    statement=(
+                        "평상시에는 API 또는 이벤트를 사용한다. 단, "
+                        "장애 대응 중 직접 조회가 필요한 경우 읽기 전용 "
+                        "계정과 필요한 범위로 제한한다."
+                    ),
+                    type="PRINCIPLE",
+                    context=SynthesisContext(
+                        domain="MSA Architecture",
+                        phase="운영 및 장애 대응",
+                    ),
+                    decision_rule=None,
+                    rationale="AI add exception",
+                    exception=(
+                        "장애 대응 중 직접 조회가 필요한 경우 읽기 전용 "
+                        "계정을 사용하고 필요한 범위로 제한한다."
+                    ),
+                    novelty_score=0.84,
+                    confidence_score=0.99,
+                    validation_status="CANDIDATE",
+                )
+            ],
+            relations=[
+                ProposedSynthesisRelation(
+                    synthesized_index=0,
+                    target_knowledge_id=target.knowledge_id,
+                    relation="HAS_EXCEPTION",
+                    reason="AI add exception",
+                )
+            ],
+            reason="AI add exception",
+        )
+
+        normalized, reason = _normalize_add_exception_payload(
+            candidate=candidate,
+            related_knowledge=[target],
+            ai_result=ai_result,
+        )
+
+        self.assertEqual(normalized.operation, "MERGE")
+        self.assertEqual(normalized.target_knowledge_ids, [])
+        self.assertEqual(normalized.relations, [])
+        self.assertEqual(
+            normalized.synthesized_knowledge_units[0].type,
+            "PRINCIPLE",
+        )
+        self.assertEqual(
+            normalized.synthesized_knowledge_units[0].statement,
+            candidate.statement,
+        )
+        self.assertIsNone(
+            normalized.synthesized_knowledge_units[0].exception
+        )
+        self.assertIsNotNone(reason)
+
+    def test_apply_tracks_actual_graph_change_instead_of_result_ids(self):
         source = inspect.getsource(
             apply_service.validate_and_apply_synthesis
         )
 
-        merge_start = source.index(
-            'elif synthesis.operation == "MERGE":'
-        )
-        add_exception_start = source.index(
-            "# ADD_EXCEPTION",
-            merge_start,
-        )
-        merge_block = source[
-            merge_start:add_exception_start
-        ]
-
-        duplicate_guard_index = merge_block.index(
-            "find_duplicate_active_knowledge("
-        )
-        create_index = merge_block.index(
-            "_create_new_unit("
-        )
-
-        self.assertLess(
-            duplicate_guard_index,
-            create_index,
+        self.assertIn(
+            "graph_changed = False",
+            source,
         )
         self.assertIn(
-            "existing active knowledge reused",
-            merge_block,
-        )
-
-
-
-    def test_apply_enrich_rechecks_duplicate_before_version_create(self):
-        """
-        AI가 같은-type target을 ENRICH하더라도 Candidate 자체가 Mission의
-        다른 활성 Knowledge와 이미 같은 의미라면 새 version으로 흡수하지
-        않고 기존 Knowledge를 재사용해야 한다.
-
-        실제 E2E의 EXCEPTION -> DECISION_RULE type-drift duplicate가
-        기존 DECISION_RULE target의 v2로 흡수되는 회귀를 막는다.
-        """
-        source = inspect.getsource(
-            apply_service.validate_and_apply_synthesis
-        )
-
-        enrich_start = source.index(
-            'if synthesis.operation in {\n            "ENRICH",'
-        )
-        merge_start = source.index(
-            'elif synthesis.operation == "MERGE":',
-            enrich_start,
-        )
-        enrich_block = source[
-            enrich_start:merge_start
-        ]
-
-        duplicate_guard_index = enrich_block.index(
-            "find_duplicate_active_knowledge("
-        )
-        material_guard_index = enrich_block.index(
-            "assess_synthesized_unit_material_change("
-        )
-        create_index = enrich_block.index(
-            "_create_new_unit("
-        )
-
-        self.assertLess(
-            duplicate_guard_index,
-            material_guard_index,
-        )
-        self.assertLess(
-            duplicate_guard_index,
-            create_index,
+            "if relation_added:",
+            source,
         )
         self.assertIn(
-            "candidate duplicate/no-op",
-            enrich_block,
+            "and graph_changed",
+            source,
         )
-        self.assertIn(
-            "existing active knowledge reused",
-            enrich_block,
+        self.assertNotIn(
+            "and resulting_ids",
+            source,
         )
+
 
 
 if __name__ == "__main__":

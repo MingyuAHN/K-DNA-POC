@@ -92,6 +92,22 @@ EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_TOKEN_CONTAINMENT = 0.40
 EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_CHAR_CONTAINMENT = 0.45
 EXCEPTION_DECISION_CONDITIONAL_NOOP_MIN_TAG_OVERLAP = 4
 
+# PRINCIPLE <-> DECISION_RULE type drift can happen when the same operational
+# rule is expressed once as a general principle and once as an if/then rule.
+#
+# Do not relax the global cross-type thresholds.  This narrow path requires
+# strong lexical/context support and, when the surface polarity differs, it
+# only tolerates the specific Korean preference paraphrase pattern
+# "A를 하지 않고 B를 사용" <-> "A보다 B를 사용".
+PRINCIPLE_DECISION_NOOP_MIN_SEQUENCE_RATIO = 0.70
+PRINCIPLE_DECISION_NOOP_MIN_TOKEN_CONTAINMENT = 0.40
+PRINCIPLE_DECISION_NOOP_MIN_CHAR_CONTAINMENT = 0.40
+PRINCIPLE_DECISION_NOOP_MIN_TAG_OVERLAP = 3
+PRINCIPLE_DECISION_NOOP_MIN_LENGTH_RATIO = 0.70
+PRINCIPLE_DECISION_NOOP_MAX_LENGTH_RATIO = 1.35
+PRINCIPLE_DECISION_PREFERENCE_TAIL_MIN_TOKEN_CONTAINMENT = 0.50
+PRINCIPLE_DECISION_PREFERENCE_TAIL_MIN_CHAR_CONTAINMENT = 0.25
+
 EXCEPTION_SIGNAL_COVERAGE_MIN_TOKEN_CONTAINMENT = 0.50
 EXCEPTION_SIGNAL_COVERAGE_MIN_CHAR_CONTAINMENT = 0.50
 
@@ -608,6 +624,156 @@ def _types_are_duplicate_compatible(candidate: KnowledgeCandidate, knowledge: Kn
     return candidate.knowledge_type in RULE_LIKE_KNOWLEDGE_TYPES and knowledge.knowledge_type in RULE_LIKE_KNOWLEDGE_TYPES
 
 
+def _types_are_principle_decision_noop_compatible(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+) -> bool:
+    return {
+        candidate.knowledge_type,
+        knowledge.knowledge_type,
+    } == {
+        'PRINCIPLE',
+        'DECISION_RULE',
+    }
+
+
+def _preference_tail(value: str | None) -> str:
+    """
+    Extract the positively preferred side of a Korean contrastive rule.
+
+    Examples:
+    - "DB를 직접 조회하지 않고 API를 사용한다" -> "API를 사용한다"
+    - "DB 직접 조회보다 API를 사용한다" -> "API를 사용한다"
+
+    This helper is intentionally narrow.  It is only used by the
+    PRINCIPLE <-> DECISION_RULE type-drift no-op guard.
+    """
+    if not value:
+        return ''
+
+    normalized = _normalize_text(value)
+    if not normalized:
+        return ''
+
+    for marker in ('하지 않고', '않고', '보다'):
+        index = normalized.find(marker)
+        if index >= 0:
+            tail = normalized[index + len(marker):].strip()
+            if tail:
+                return tail
+    return ''
+
+
+def _principle_decision_preference_polarity_equivalent(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+) -> bool:
+    """
+    Permit one specific surface-polarity mismatch:
+
+    "A를 하지 않고 B를 사용한다" and "A보다 B를 사용한다"
+    both choose B.  The first contains a negation token while the second may
+    not, but their actual conclusion direction is the same.
+
+    A direct inversion such as "B를 사용하지 않고 A를 사용한다" must
+    fail because the preferred tails will not overlap.
+    """
+    left = candidate.statement or ''
+    right = knowledge.statement or ''
+
+    has_negative_alternative = (
+        ('않고' in left and '보다' in right)
+        or ('보다' in left and '않고' in right)
+        or ('하지 않고' in left and '보다' in right)
+        or ('보다' in left and '하지 않고' in right)
+    )
+    if not has_negative_alternative:
+        return False
+
+    left_tail = _preference_tail(left)
+    right_tail = _preference_tail(right)
+    if not left_tail or not right_tail:
+        return False
+
+    left_to_right_token = _token_containment(left_tail, right_tail)
+    right_to_left_token = _token_containment(right_tail, left_tail)
+    bidirectional_token = min(left_to_right_token, right_to_left_token)
+
+    left_to_right_char = _char_containment(left_tail, right_tail)
+    right_to_left_char = _char_containment(right_tail, left_tail)
+    bidirectional_char = min(left_to_right_char, right_to_left_char)
+
+    return (
+        bidirectional_token
+        >= PRINCIPLE_DECISION_PREFERENCE_TAIL_MIN_TOKEN_CONTAINMENT
+        and bidirectional_char
+        >= PRINCIPLE_DECISION_PREFERENCE_TAIL_MIN_CHAR_CONTAINMENT
+    )
+
+
+def _is_principle_decision_type_drift_noop(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+    metrics: _SimilarityMetrics,
+) -> bool:
+    """
+    Strict lexical no-op for PRINCIPLE <-> DECISION_RULE type drift.
+
+    The general cross-type duplicate thresholds stay conservative.  This
+    fallback only applies to the exact PRINCIPLE/DECISION_RULE pair, requires
+    strong lexical and context overlap, and verifies matching `time` context
+    when both sides provide it.
+    """
+    if not _types_are_principle_decision_noop_compatible(
+        candidate=candidate,
+        knowledge=knowledge,
+    ):
+        return False
+
+    if not (
+        PRINCIPLE_DECISION_NOOP_MIN_LENGTH_RATIO
+        <= metrics.length_ratio
+        <= PRINCIPLE_DECISION_NOOP_MAX_LENGTH_RATIO
+    ):
+        return False
+
+    if metrics.sequence_ratio < PRINCIPLE_DECISION_NOOP_MIN_SEQUENCE_RATIO:
+        return False
+    if (
+        metrics.token_containment
+        < PRINCIPLE_DECISION_NOOP_MIN_TOKEN_CONTAINMENT
+    ):
+        return False
+    if (
+        metrics.char_containment
+        < PRINCIPLE_DECISION_NOOP_MIN_CHAR_CONTAINMENT
+    ):
+        return False
+    if metrics.tag_overlap_count < PRINCIPLE_DECISION_NOOP_MIN_TAG_OVERLAP:
+        return False
+
+    candidate_time = _normalize_context_value(
+        (candidate.context or {}).get('time')
+    )
+    knowledge_time = _normalize_context_value(
+        (knowledge.context or {}).get('time')
+    )
+    if (
+        candidate_time is not None
+        and knowledge_time is not None
+        and not _fuzzy_context_values_match(candidate_time, knowledge_time)
+    ):
+        return False
+
+    if not _has_polarity_mismatch(candidate=candidate, knowledge=knowledge):
+        return True
+
+    return _principle_decision_preference_polarity_equivalent(
+        candidate=candidate,
+        knowledge=knowledge,
+    )
+
+
 def _types_are_exception_decision_noop_compatible(
     candidate: KnowledgeCandidate,
     knowledge: KnowledgeUnit,
@@ -749,6 +915,46 @@ def _is_contained_insufficiency_duplicate(
     return (
         metrics.token_containment >= INSUFFICIENCY_SUBCLAIM_MIN_TOKEN_CONTAINMENT
         and metrics.char_containment >= INSUFFICIENCY_SUBCLAIM_MIN_CHAR_CONTAINMENT
+    )
+
+
+def _is_same_type_exception_contained_lexical_duplicate(
+    candidate: KnowledgeCandidate,
+    knowledge: KnowledgeUnit,
+    metrics: _SimilarityMetrics,
+) -> bool:
+    """
+    기존 EXCEPTION이 더 긴 형태로 동일한 조건부 허용 규칙을 이미
+    포함하고 있고 Candidate가 그 핵심 예외 문장만 다시 진술한 경우를
+    embedding 없이 duplicate로 억제한다.
+
+    ADD_EXCEPTION normalization이 Candidate.exception을 독립 EXCEPTION
+    unit으로 분리한 뒤 기존 VERIFIED EXCEPTION을 재사용할 수 있도록
+    하는 좁은 fallback이다. 일반 same-type duplicate threshold를 낮추지
+    않는다.
+    """
+
+    if candidate.knowledge_type != "EXCEPTION":
+        return False
+    if knowledge.knowledge_type != "EXCEPTION":
+        return False
+    if metrics.length_ratio > 0.85:
+        return False
+    if metrics.tag_overlap_count < 3:
+        return False
+    if not _expresses_positive_allowance(candidate.statement):
+        return False
+    if not _expresses_positive_allowance(knowledge.statement):
+        return False
+    if not _expresses_conditional_unavailability(candidate.statement):
+        return False
+    if not _expresses_conditional_unavailability(knowledge.statement):
+        return False
+
+    return (
+        metrics.sequence_ratio >= 0.50
+        and metrics.token_containment >= 0.55
+        and metrics.char_containment >= 0.45
     )
 
 def _cheap_rank_score(metrics: _SimilarityMetrics) -> float:
@@ -1552,7 +1758,24 @@ def find_duplicate_active_knowledge(db: Session, mission_id: uuid.UUID, candidat
 
         if not _contexts_are_compatible(candidate=candidate, knowledge=knowledge):
             continue
-        if _has_polarity_mismatch(candidate=candidate, knowledge=knowledge):
+
+        principle_decision_type_drift = (
+            _types_are_principle_decision_noop_compatible(
+                candidate=candidate,
+                knowledge=knowledge,
+            )
+        )
+        polarity_mismatch = _has_polarity_mismatch(
+            candidate=candidate,
+            knowledge=knowledge,
+        )
+        if polarity_mismatch and not (
+            principle_decision_type_drift
+            and _principle_decision_preference_polarity_equivalent(
+                candidate=candidate,
+                knowledge=knowledge,
+            )
+        ):
             continue
 
         candidate_adds_exception = _candidate_adds_exception_signal(
@@ -1571,6 +1794,26 @@ def find_duplicate_active_knowledge(db: Session, mission_id: uuid.UUID, candidat
 
         knowledge_normalized = _normalize_text(knowledge.statement)
         metrics = _build_metrics(candidate=candidate, knowledge=knowledge)
+
+        if (
+            principle_decision_type_drift
+            and _is_principle_decision_type_drift_noop(
+                candidate=candidate,
+                knowledge=knowledge,
+                metrics=metrics,
+            )
+        ):
+            return DuplicateKnowledgeMatch(
+                knowledge=knowledge,
+                match_type='PRINCIPLE_DECISION_TYPE_DRIFT_NOOP',
+                sequence_ratio=metrics.sequence_ratio,
+                token_jaccard=metrics.token_jaccard,
+                token_containment=metrics.token_containment,
+                char_containment=metrics.char_containment,
+                semantic_similarity=None,
+                combined_score=_cheap_rank_score(metrics),
+                tag_overlap_count=metrics.tag_overlap_count,
+            )
 
         if strict_type_drift_compatible and not normal_compatible:
             # 동일한 조건부 규칙이 type만 drift한 것이 lexical 지표만으로도
@@ -1622,6 +1865,22 @@ def find_duplicate_active_knowledge(db: Session, mission_id: uuid.UUID, candidat
             return DuplicateKnowledgeMatch(knowledge=knowledge, match_type='EXACT', sequence_ratio=1.0, token_jaccard=1.0, token_containment=1.0, char_containment=1.0, semantic_similarity=None, combined_score=1.0, tag_overlap_count=metrics.tag_overlap_count)
         if _is_contained_insufficiency_duplicate(candidate=candidate, knowledge=knowledge, metrics=metrics):
             return DuplicateKnowledgeMatch(knowledge=knowledge, match_type='INSUFFICIENCY_CONTAINMENT', sequence_ratio=metrics.sequence_ratio, token_jaccard=metrics.token_jaccard, token_containment=metrics.token_containment, char_containment=metrics.char_containment, semantic_similarity=None, combined_score=_cheap_rank_score(metrics), tag_overlap_count=metrics.tag_overlap_count)
+        if _is_same_type_exception_contained_lexical_duplicate(
+            candidate=candidate,
+            knowledge=knowledge,
+            metrics=metrics,
+        ):
+            return DuplicateKnowledgeMatch(
+                knowledge=knowledge,
+                match_type='SAME_TYPE_EXCEPTION_CONTAINMENT',
+                sequence_ratio=metrics.sequence_ratio,
+                token_jaccard=metrics.token_jaccard,
+                token_containment=metrics.token_containment,
+                char_containment=metrics.char_containment,
+                semantic_similarity=None,
+                combined_score=_cheap_rank_score(metrics),
+                tag_overlap_count=metrics.tag_overlap_count,
+            )
         compatible_metrics.append(metrics)
 
     if not compatible_metrics and not strict_type_drift_metrics:
