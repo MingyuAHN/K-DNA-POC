@@ -1,7 +1,8 @@
 from typing import List, Optional, Literal
 from uuid import UUID
-from pydantic import BaseModel, Field
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from .common import ContextTags
 from .enums import (
     KnowledgeType,
@@ -20,7 +21,9 @@ class MissionContext(BaseModel):
     mission_id: str
     domain: str
     objective: str
-    focus_topics: List[str] = Field(default_factory=list)
+    focus_topics: List[str] = Field(
+        default_factory=list
+    )
 
 
 class InterviewContext(BaseModel):
@@ -84,6 +87,7 @@ class RetrievedEvidence(BaseModel):
         default_factory=ContextTags
     )
 
+
 class RetrievedKnowledgeUnit(BaseModel):
     model_config = ConfigDict(
         extra="forbid"
@@ -120,22 +124,28 @@ class RetrievedKnowledgeUnit(BaseModel):
     exception: Optional[str] = None
 
 
-# backend가 ai orchestrator에게 넘길 최상위 input 
+# Backend가 AI Orchestrator에게 넘길 최상위 Input
 class InterviewAnalysisRequest(BaseModel):
     mission: MissionContext
     interview: InterviewContext
 
     message: ConversationMessage
 
-    conversation_context: List[ConversationMessage] = Field(
+    conversation_context: List[
+        ConversationMessage
+    ] = Field(
         default_factory=list
     )
 
-    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+    retrieved_knowledge: List[
+        RetrievedKnowledge
+    ] = Field(
         default_factory=list
     )
 
-    retrieved_evidence: List[RetrievedEvidence] = Field(
+    retrieved_evidence: List[
+        RetrievedEvidence
+    ] = Field(
         default_factory=list
     )
 
@@ -145,33 +155,49 @@ class InterviewAnalysisRequest(BaseModel):
         default_factory=list
     )
 
-#AI Response Schema 
+
+# ---------------------------------------------------------
+# AI Response Schema
+# ---------------------------------------------------------
+
 class DecisionRule(BaseModel):
-    if_conditions: List[str] = Field(default_factory=list)
+    if_conditions: List[str] = Field(
+        default_factory=list
+    )
+
     then: Optional[str] = None
-    unless: List[str] = Field(default_factory=list)
+
+    unless: List[str] = Field(
+        default_factory=list
+    )
 
 
 class KnowledgeCandidate(BaseModel):
-    # 기존 필드들 그대로
     statement: str
     type: KnowledgeType
     context: ContextTags
+
     decision_rule: DecisionRule | None = None
     rationale: str | None = None
     exception: str | None = None
+
     novelty_score: float
     confidence_score: float
+
     validation_status: ValidationStatus
 
     @model_validator(mode="after")
     def normalize_decision_rule(self):
         if self.decision_rule is not None:
-            then_value = self.decision_rule.then
+            then_value = (
+                self.decision_rule.then
+            )
 
             if (
                 then_value is None
-                or not str(then_value).strip()
+                or not str(
+                    then_value
+                ).strip()
             ):
                 self.decision_rule = None
 
@@ -180,12 +206,17 @@ class KnowledgeCandidate(BaseModel):
 
 # Knowledge Extractor 전용 Response
 class KnowledgeExtractionResponse(BaseModel):
-    knowledge_candidates: List[KnowledgeCandidate] = Field(
+    knowledge_candidates: List[
+        KnowledgeCandidate
+    ] = Field(
         default_factory=list
     )
 
 
+# ---------------------------------------------------------
 # Semantic Alignment
+# ---------------------------------------------------------
+
 class SemanticRelation(BaseModel):
     target_type: RelationTargetType
     target_id: str
@@ -200,11 +231,15 @@ class SemanticRelation(BaseModel):
 class SemanticAlignmentRequest(BaseModel):
     candidate: KnowledgeCandidate
 
-    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+    retrieved_knowledge: List[
+        RetrievedKnowledge
+    ] = Field(
         default_factory=list
     )
 
-    retrieved_evidence: List[RetrievedEvidence] = Field(
+    retrieved_evidence: List[
+        RetrievedEvidence
+    ] = Field(
         default_factory=list
     )
 
@@ -214,18 +249,29 @@ class SemanticAlignmentRequest(BaseModel):
         default_factory=list
     )
 
+
 class SemanticAlignmentResponse(BaseModel):
-    relations: List[SemanticRelation] = Field(
+    relations: List[
+        SemanticRelation
+    ] = Field(
         default_factory=list
     )
 
 
-#Gap
+# ---------------------------------------------------------
+# Gap
+# ---------------------------------------------------------
+
 class KnowledgeGap(BaseModel):
     topic: str
     dimension: GapDimension
     gap_type: GapType
-    gap_score: float = Field(ge=0, le=1)
+
+    gap_score: float = Field(
+        ge=0,
+        le=1,
+    )
+
     reason: str
 
 
@@ -234,11 +280,19 @@ class GapAnalysisRequest(BaseModel):
     candidate: KnowledgeCandidate
     mission: MissionContext
 
-    conversation_context: List[ConversationMessage] = Field(
+    # 현재 Turn의 전문가 원문 답변
+    message: ConversationMessage
+
+    # 이전 Turn 전체 대화 이력
+    conversation_context: List[
+        ConversationMessage
+    ] = Field(
         default_factory=list
     )
 
-    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+    retrieved_knowledge: List[
+        RetrievedKnowledge
+    ] = Field(
         default_factory=list
     )
 
@@ -248,18 +302,53 @@ class GapAnalysisRequest(BaseModel):
         default_factory=list
     )
 
-    retrieved_evidence: List[RetrievedEvidence] = Field(
+    retrieved_evidence: List[
+        RetrievedEvidence
+    ] = Field(
         default_factory=list
     )
+
 
 # Gap Analyzer 전용 Response
 class GapAnalysisResponse(BaseModel):
-    gaps: List[KnowledgeGap] = Field(
+    gaps: List[
+        KnowledgeGap
+    ] = Field(
         default_factory=list
     )
 
 
-#Conflict
+# ---------------------------------------------------------
+# Gap Semantic Consolidation
+# ---------------------------------------------------------
+
+class GapConsolidationRequest(BaseModel):
+    mission: MissionContext
+    message: ConversationMessage
+
+    conversation_context: List[
+        ConversationMessage
+    ] = Field(
+        default_factory=list
+    )
+
+    gaps: List[
+        KnowledgeGap
+    ] = Field(
+        default_factory=list
+    )
+
+
+class GapConsolidationResponse(BaseModel):
+    selected_indices: List[int] = Field(
+        default_factory=list
+    )
+
+
+# ---------------------------------------------------------
+# Conflict
+# ---------------------------------------------------------
+
 class ConflictSource(BaseModel):
     source_type: str
     source_id: str
@@ -271,7 +360,11 @@ class ConflictResult(BaseModel):
     severity: ConflictSeverity
     description: str
 
-    sources: List[ConflictSource] = Field(default_factory=list)
+    sources: List[
+        ConflictSource
+    ] = Field(
+        default_factory=list
+    )
 
     context_difference: Optional[str] = None
     unknown_condition: Optional[str] = None
@@ -283,15 +376,21 @@ class ConflictAnalysisRequest(BaseModel):
     candidate: KnowledgeCandidate
     mission: MissionContext
 
-    semantic_relations: List[SemanticRelation] = Field(
+    semantic_relations: List[
+        SemanticRelation
+    ] = Field(
         default_factory=list
     )
 
-    retrieved_knowledge: List[RetrievedKnowledge] = Field(
+    retrieved_knowledge: List[
+        RetrievedKnowledge
+    ] = Field(
         default_factory=list
     )
 
-    retrieved_evidence: List[RetrievedEvidence] = Field(
+    retrieved_evidence: List[
+        RetrievedEvidence
+    ] = Field(
         default_factory=list
     )
 
@@ -301,70 +400,121 @@ class ConflictAnalysisRequest(BaseModel):
         default_factory=list
     )
 
+
 # Conflict Detector 전용 Response
 class ConflictAnalysisResponse(BaseModel):
-    conflicts: List[ConflictResult] = Field(
+    conflicts: List[
+        ConflictResult
+    ] = Field(
         default_factory=list
     )
 
 
-#Question Candidate Schema
+# ---------------------------------------------------------
+# Question Candidate
+# ---------------------------------------------------------
+
 class QuestionCandidate(BaseModel):
     question: str
     question_type: QuestionType
 
     target_gap: Optional[str] = None
 
-    gap_reduction_score: float = Field(ge=0, le=1)
-    novelty_score: float = Field(ge=0, le=1)
-    business_impact_score: float = Field(ge=0, le=1)
-    conflict_resolution_score: float = Field(ge=0, le=1)
-    redundancy_score: float = Field(ge=0, le=1)
+    gap_reduction_score: float = Field(
+        ge=0,
+        le=1,
+    )
 
-    value_score: float = Field(ge=0, le=1)
+    novelty_score: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    business_impact_score: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    conflict_resolution_score: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    redundancy_score: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    value_score: float = Field(
+        ge=0,
+        le=1,
+    )
 
 
 class QuestionPlanningRequest(BaseModel):
     candidate: KnowledgeCandidate
     mission: MissionContext
 
-    gaps: List[KnowledgeGap] = Field(
+    gaps: List[
+        KnowledgeGap
+    ] = Field(
         default_factory=list
     )
 
-    conflicts: List[ConflictResult] = Field(
+    conflicts: List[
+        ConflictResult
+    ] = Field(
         default_factory=list
     )
 
-    conversation_context: List[ConversationMessage] = Field(
+    conversation_context: List[
+        ConversationMessage
+    ] = Field(
         default_factory=list
     )
 
 
 class QuestionPlanningResponse(BaseModel):
-    question_candidates: List[QuestionCandidate] = Field(
+    question_candidates: List[
+        QuestionCandidate
+    ] = Field(
         default_factory=list
     )
 
-    next_question: Optional[QuestionCandidate] = None
+    next_question: Optional[
+        QuestionCandidate
+    ] = None
 
 
-#최종 Response
+# ---------------------------------------------------------
+# 최종 Response
+# ---------------------------------------------------------
+
 class InterviewAnalysisResponse(BaseModel):
-    knowledge_candidates: List[KnowledgeCandidate] = Field(
+    knowledge_candidates: List[
+        KnowledgeCandidate
+    ] = Field(
         default_factory=list
     )
 
-    gaps: List[KnowledgeGap] = Field(
+    gaps: List[
+        KnowledgeGap
+    ] = Field(
         default_factory=list
     )
 
-    conflicts: List[ConflictResult] = Field(
+    conflicts: List[
+        ConflictResult
+    ] = Field(
         default_factory=list
     )
 
-    question_candidates: List[QuestionCandidate] = Field(
+    question_candidates: List[
+        QuestionCandidate
+    ] = Field(
         default_factory=list
     )
 
-    next_question: Optional[QuestionCandidate] = None
+    next_question: Optional[
+        QuestionCandidate
+    ] = None

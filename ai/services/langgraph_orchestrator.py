@@ -14,6 +14,7 @@ from shared.schemas.interview import (
     QuestionCandidate,
     SemanticAlignmentRequest,
     GapAnalysisRequest,
+    GapConsolidationRequest,
     ConflictAnalysisRequest,
     QuestionPlanningRequest,
 )
@@ -71,12 +72,14 @@ class LangGraphAIOrchestrator:
         gap_analyzer,
         conflict_detector,
         question_planner,
+        gap_consolidator=None,
     ):
         self.knowledge_extractor = knowledge_extractor
         self.semantic_aligner = semantic_aligner
         self.gap_analyzer = gap_analyzer
         self.conflict_detector = conflict_detector
         self.question_planner = question_planner
+        self.gap_consolidator = gap_consolidator
 
         self.graph = self._build_graph()
 
@@ -202,6 +205,7 @@ class LangGraphAIOrchestrator:
         state: KDNAState,
     ):
         request = state["request"]
+
         candidates = state.get(
             "knowledge_candidates",
             [],
@@ -268,6 +272,7 @@ class LangGraphAIOrchestrator:
         state: KDNAState,
     ):
         request = state["request"]
+
         candidates = state.get(
             "knowledge_candidates",
             [],
@@ -280,15 +285,23 @@ class LangGraphAIOrchestrator:
             gap_request = GapAnalysisRequest(
                 candidate=candidate,
                 mission=request.mission,
+
+                # 현재 Turn의 전문가 원문 답변
+                message=request.message,
+
+                # 이전 Turn 전체 대화 이력
                 conversation_context=(
                     request.conversation_context
                 ),
+
                 retrieved_knowledge=(
                     request.retrieved_knowledge
                 ),
+
                 retrieved_knowledge_units=(
                     request.retrieved_knowledge_units
                 ),
+
                 retrieved_evidence=(
                     request.retrieved_evidence
                 ),
@@ -363,12 +376,15 @@ class LangGraphAIOrchestrator:
                     candidate=candidate,
                     mission=request.mission,
                     semantic_relations=relations,
+
                     retrieved_knowledge=(
                         request.retrieved_knowledge
                     ),
+
                     retrieved_knowledge_units=(
                         request.retrieved_knowledge_units
                     ),
+
                     retrieved_evidence=(
                         request.retrieved_evidence
                     ),
@@ -411,7 +427,7 @@ class LangGraphAIOrchestrator:
         }
 
     # ---------------------------------------------------------
-    # 5. Gap / Conflict Dedup & Top-K
+    # 5. Gap / Conflict Deterministic Dedup & Top-K
     # ---------------------------------------------------------
 
     def _reduce_results(
@@ -461,12 +477,131 @@ class LangGraphAIOrchestrator:
         return {
             "reduced_gaps":
                 reduced_gaps,
+
             "reduced_conflicts":
                 reduced_conflicts,
         }
 
     # ---------------------------------------------------------
-    # 6. Question Planning
+    # 6. Gap Semantic Consolidation
+    #
+    # Candidate별로 독립 생성된 Gap들을 한 번에 비교하여
+    # 의미적으로 동일한 Gap을 대표 1건으로 정리한다.
+    #
+    # LLM은 Gap 자체를 새로 생성하지 않고
+    # 유지할 원본 Gap의 index만 선택한다.
+    #
+    # Cross-turn lifecycle / RESOLVED 처리가 아니라
+    # 현재 Analyze 호출 내부의 semantic dedupe 단계이다.
+    # ---------------------------------------------------------
+
+    def _gap_consolidate(
+        self,
+        state: KDNAState,
+    ):
+        request = state["request"]
+
+        reduced_gaps = state.get(
+            "reduced_gaps",
+            [],
+        )
+
+        # 기존 테스트처럼 Consolidator가 연결되지 않은 경우
+        # 기존 reduced_gaps를 그대로 유지한다.
+        if self.gap_consolidator is None:
+            return {
+                "reduced_gaps":
+                    reduced_gaps
+            }
+
+        if not reduced_gaps:
+            return {
+                "reduced_gaps": []
+            }
+
+        consolidation_request = (
+            GapConsolidationRequest(
+                mission=request.mission,
+                message=request.message,
+                conversation_context=(
+                    request.conversation_context
+                ),
+                gaps=reduced_gaps,
+            )
+        )
+
+        start = time.perf_counter()
+
+        result = (
+            self.gap_consolidator.consolidate(
+                consolidation_request
+            )
+        )
+
+        elapsed = (
+            time.perf_counter()
+            - start
+        )
+
+        # -----------------------------------------------------
+        # Deterministic Index Guard
+        #
+        # LLM은 기존 Gap의 index만 선택할 수 있다.
+        #
+        # - 범위를 벗어난 index 제거
+        # - 중복 index 제거
+        # - 원래 Gap 순서 유지
+        #
+        # 이 단계에서 Gap의 topic/reason/dimension 등을
+        # 새로 생성하거나 수정하지 않는다.
+        # -----------------------------------------------------
+
+        valid_indices = set()
+
+        for index in result.selected_indices:
+            if (
+                0 <= index
+                < len(reduced_gaps)
+            ):
+                valid_indices.add(index)
+            else:
+                print(
+                    "[GAP-CONSOLIDATE-GUARD] "
+                    f"invalid index skipped: "
+                    f"{index}",
+                    flush=True,
+                )
+
+        # reduced_gaps의 기존 순서를 보존한다.
+        consolidated_gaps = [
+            gap
+            for index, gap
+            in enumerate(reduced_gaps)
+            if index in valid_indices
+        ]
+
+        print(
+            f"[PERF] gap_consolidate: "
+            f"{elapsed:.2f}s",
+            flush=True,
+        )
+
+        print(
+            f"[RESULT] semantic gaps "
+            f"{len(reduced_gaps)} -> "
+            f"{len(consolidated_gaps)} "
+            f"indices="
+            f"{sorted(valid_indices)}",
+            flush=True,
+        )
+
+        return {
+            "reduced_gaps":
+                consolidated_gaps
+        }
+
+    # ---------------------------------------------------------
+    # 7. Question Planning
     #
     # 인터뷰 자동 종료 정책 없음.
     # 인터뷰 종료는 Front/Backend의 사용자 종료 동작이 담당한다.
@@ -573,7 +708,7 @@ class LangGraphAIOrchestrator:
             result.question_candidates
         )
 
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
         # Deterministic Guard
         #
         # Conflict 존재 여부의 기준은 reduced_conflicts이다.
@@ -584,7 +719,7 @@ class LangGraphAIOrchestrator:
         #
         # Gap 설명이나 Question Planner의 판단만으로
         # Conflict가 존재한다고 간주하지 않는다.
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
 
         if not reduced_conflicts:
             guarded_questions = []
@@ -609,15 +744,14 @@ class LangGraphAIOrchestrator:
                     )
                     continue
 
-                # 실제 Conflict가 없으므로
-                # conflict_resolution_score도 0으로 보정
                 if hasattr(
                     question,
                     "conflict_resolution_score",
                 ):
                     question = question.model_copy(
                         update={
-                            "conflict_resolution_score": 0.0
+                            "conflict_resolution_score":
+                                0.0
                         }
                     )
 
@@ -640,7 +774,7 @@ class LangGraphAIOrchestrator:
                 "question_candidates": [],
                 "next_question": None,
             }
-        
+
         # 이전 AI 질문과 너무 유사한 질문은 우선 제외한다.
         # 단, 전부 유사하더라도 인터뷰를 자동 종료하지 않고
         # 가장 가치가 높은 질문을 fallback으로 선택한다.
@@ -680,6 +814,7 @@ class LangGraphAIOrchestrator:
             next_question = (
                 final_questions[0]
             )
+
         else:
             # 자동 종료하지 않는다.
             # 모든 후보가 기존 질문과 유사할 경우
@@ -717,12 +852,13 @@ class LangGraphAIOrchestrator:
         return {
             "question_candidates":
                 final_questions,
+
             "next_question":
                 next_question,
         }
 
     # ---------------------------------------------------------
-    # 7. Final Response
+    # 8. Final Response
     # ---------------------------------------------------------
 
     def _finalize(
@@ -734,18 +870,22 @@ class LangGraphAIOrchestrator:
                 "knowledge_candidates",
                 [],
             ),
+
             gaps=state.get(
                 "reduced_gaps",
                 [],
             ),
+
             conflicts=state.get(
                 "reduced_conflicts",
                 [],
             ),
+
             question_candidates=state.get(
                 "question_candidates",
                 [],
             ),
+
             next_question=state.get(
                 "next_question"
             ),
@@ -788,6 +928,11 @@ class LangGraphAIOrchestrator:
         )
 
         builder.add_node(
+            "gap_consolidate",
+            self._gap_consolidate,
+        )
+
+        builder.add_node(
             "question_plan",
             self._question_plan,
         )
@@ -811,9 +956,6 @@ class LangGraphAIOrchestrator:
         # Gap Analysis는 Semantic Alignment 결과에 의존하지 않으므로
         # Knowledge Extraction 직후 동시에 시작할 수 있다.
         # Conflict Detection만 Semantic Alignment 결과를 기다린다.
-        #
-        # list 형태의 start nodes를 사용해 gap_analyze와
-        # conflict_detect가 모두 완료된 뒤 reduce_results를 실행한다.
 
         builder.add_edge(
             "knowledge_extract",
@@ -838,8 +980,15 @@ class LangGraphAIOrchestrator:
             "reduce_results",
         )
 
+        # Candidate별 결과를 deterministic하게 1차 정리한 뒤,
+        # 전체 Gap을 Semantic Consolidator가 한 번 더 비교한다.
         builder.add_edge(
             "reduce_results",
+            "gap_consolidate",
+        )
+
+        builder.add_edge(
+            "gap_consolidate",
             "question_plan",
         )
 

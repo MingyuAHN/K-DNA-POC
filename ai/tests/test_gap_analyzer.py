@@ -2,6 +2,7 @@ from shared.schemas.common import ContextTags
 
 from shared.schemas.interview import (
     MissionContext,
+    ConversationMessage,
     KnowledgeCandidate,
     GapAnalysisRequest,
 )
@@ -89,8 +90,16 @@ def test_gap_analyzer():
     request = GapAnalysisRequest(
         candidate=candidate,
         mission=mission,
+        message=ConversationMessage(
+            speaker="EXPERT",
+            content=(
+                "서비스별 데이터베이스 분리를 "
+                "원칙으로 한다."
+            ),
+        ),
         conversation_context=[],
         retrieved_knowledge=[],
+        retrieved_knowledge_units=[],
         retrieved_evidence=[],
     )
 

@@ -55,6 +55,9 @@ class AIOrchestrator:
             alignment_request = SemanticAlignmentRequest(
                 candidate=candidate,
                 retrieved_knowledge=request.retrieved_knowledge,
+                retrieved_knowledge_units=(
+                    request.retrieved_knowledge_units
+                ),
                 retrieved_evidence=request.retrieved_evidence,
             )
 
@@ -66,8 +69,12 @@ class AIOrchestrator:
             gap_request = GapAnalysisRequest(
                 candidate=candidate,
                 mission=request.mission,
+                message=request.message,
                 conversation_context=request.conversation_context,
                 retrieved_knowledge=request.retrieved_knowledge,
+                retrieved_knowledge_units=(
+                    request.retrieved_knowledge_units
+                ),
                 retrieved_evidence=request.retrieved_evidence,
             )
 
@@ -84,6 +91,7 @@ class AIOrchestrator:
                 semantic_relations=alignment_result.relations,
                 retrieved_knowledge=request.retrieved_knowledge,
                 retrieved_evidence=request.retrieved_evidence,
+                retrieved_knowledge_units=(request.retrieved_knowledge_units)
             )
 
             conflict_result = self.conflict_detector.detect(

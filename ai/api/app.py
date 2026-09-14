@@ -54,7 +54,7 @@ from ai.agents.semantic_aligner import SemanticAligner
 from ai.agents.gap_analyzer import GapAnalyzer
 from ai.agents.conflict_detector import ConflictDetector
 from ai.agents.question_planner import QuestionPlanner
-
+from ai.agents.gap_consolidator import GapConsolidator
 from ai.services.orchestrator import AIOrchestrator
 from ai.services.openai_gateway import OpenAIGateway
 
@@ -157,6 +157,7 @@ def get_interview_orchestrator():
         knowledge_extractor=KnowledgeExtractor(gateway),
         semantic_aligner=SemanticAligner(gateway),
         gap_analyzer=GapAnalyzer(gateway),
+        gap_consolidator=GapConsolidator(gateway),
         conflict_detector=ConflictDetector(gateway),
         question_planner=QuestionPlanner(gateway),
     )

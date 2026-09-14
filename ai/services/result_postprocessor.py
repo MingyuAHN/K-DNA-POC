@@ -76,7 +76,8 @@ def deduplicate_gaps(
 
     merged: list[KnowledgeGap] = []
 
-    # 높은 Gap부터 처리
+    # 높은 Gap부터 처리해서
+    # 동일 Dimension 내 중복이면 더 중요한 Gap을 유지한다.
     ranked = sorted(
         gaps,
         key=lambda item: item.gap_score,
@@ -87,21 +88,55 @@ def deduplicate_gaps(
         duplicate = False
 
         for existing in merged:
-            same_dimension = (
-                existing.dimension == gap.dimension
-            )
+
+            # Deterministic dedupe에서는
+            # 서로 다른 Dimension을 임의로 병합하지 않는다.
+            #
+            # WHEN과 EXCEPTION처럼 Topic이 같아도
+            # 실제 필요한 답변이 다를 수 있기 때문이다.
+            if (
+                existing.dimension
+                != gap.dimension
+            ):
+                continue
 
             similar_topic = _similar(
                 existing.topic,
                 gap.topic,
+                threshold=0.72,
             )
 
-            if same_dimension and similar_topic:
+            similar_reason = _similar(
+                existing.reason,
+                gap.reason,
+                threshold=0.70,
+            )
+
+            # 동일 Dimension이고,
+            # Topic 또는 실제 부족 내용이 충분히 유사한 경우만
+            # deterministic duplicate로 처리한다.
+            if (
+                similar_topic
+                or similar_reason
+            ):
                 duplicate = True
+
+                print(
+                    "[GAP-GLOBAL-DEDUP] "
+                    "skip duplicate gap: "
+                    f"topic={gap.topic}, "
+                    f"dimension={gap.dimension}, "
+                    f"kept_topic={existing.topic}",
+                    flush=True,
+                )
+
                 break
 
         if not duplicate:
             merged.append(gap)
+
+        if len(merged) >= MAX_GAPS:
+            break
 
     return merged[:MAX_GAPS]
 
