@@ -221,8 +221,20 @@ export default function DashboardLayout({
         </div>
 
         {/* 페이지 콘텐츠 */}
-        <main className="custom-scrollbar flex-1 overflow-y-auto">
-          <div className="animate-in fade-in slide-in-from-bottom-2 px-3 pb-4 pt-3 duration-700 md:px-5 md:pb-6 md:pt-4">
+        <main
+          className={`custom-scrollbar min-h-0 flex-1 ${
+            pathname === "/gap"
+              ? "overflow-hidden"
+              : "overflow-y-auto"
+          }`}
+        >
+          <div
+            className={`animate-in fade-in slide-in-from-bottom-2 px-3 pt-3 duration-700 md:px-5 md:pt-4 ${
+              pathname === "/gap"
+                ? "h-full min-h-0 overflow-hidden pb-3 md:pb-4"
+                : "pb-4 md:pb-6"
+            }`}
+          >
             {children}
           </div>
         </main>

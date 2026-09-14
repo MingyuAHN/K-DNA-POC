@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -59,6 +60,15 @@ export default function GapPage() {
     errorMessage,
     setErrorMessage,
   ] = useState("");
+
+  // 오른쪽 상세 높이 측정
+  const detailRef =
+    useRef<HTMLDivElement | null>(null);
+
+  const [
+    detailHeight,
+    setDetailHeight,
+  ] = useState<number | null>(null);
 
   // Mission 목록 조회
   useEffect(() => {
@@ -228,9 +238,40 @@ export default function GapPage() {
       selectedTopic,
     ]);
 
+  // 오른쪽 상세 높이 감지
+  useEffect(() => {
+    const element =
+      detailRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    const updateHeight = () => {
+      setDetailHeight(
+        element.getBoundingClientRect()
+          .height
+      );
+    };
+
+    updateHeight();
+
+    const observer =
+      new ResizeObserver(updateHeight);
+
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    selectedTopic,
+    selectedTopicGaps,
+  ]);
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
-      <div className="mx-auto max-w-[1500px] space-y-5">
+    <div className="h-full min-h-0 overflow-hidden bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
+      <div className="mx-auto flex h-full min-h-0 max-w-[1500px] flex-col gap-5">
         {/* 화면 제목 */}
         <header className="px-1">
           <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
@@ -264,36 +305,50 @@ export default function GapPage() {
         )}
 
         {/* Gap 이력 */}
-        <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <TopicList
-            topicGroups={
-              topicGroups
-            }
-            selectedTopic={
-              selectedTopic
-            }
-            selectedMissionTitle={
-              selectedMission?.title
-            }
-            totalGapCount={
-              gaps.length
-            }
-            loading={
-              isGapLoading
-            }
-            onSelect={
-              setSelectedTopic
-            }
-          />
+        <div className="grid min-h-0 flex-1 items-start gap-4 overflow-hidden xl:grid-cols-[360px_minmax(0,1fr)]">
+          {/* 왼쪽: 오른쪽 상세 높이에 맞춤 */}
+          <div
+            className="min-h-0"
+            style={{
+              height:
+                detailHeight !== null
+                  ? `${detailHeight}px`
+                  : undefined,
+            }}
+          >
+            <TopicList
+              topicGroups={
+                topicGroups
+              }
+              selectedTopic={
+                selectedTopic
+              }
+              selectedMissionTitle={
+                selectedMission?.title
+              }
+              totalGapCount={
+                gaps.length
+              }
+              loading={
+                isGapLoading
+              }
+              onSelect={
+                setSelectedTopic
+              }
+            />
+          </div>
 
-          <GapDetail
-            selectedTopic={
-              selectedTopic
-            }
-            gaps={
-              selectedTopicGaps
-            }
-          />
+          {/* 오른쪽 상세 */}
+          <div ref={detailRef}>
+            <GapDetail
+              selectedTopic={
+                selectedTopic
+              }
+              gaps={
+                selectedTopicGaps
+              }
+            />
+          </div>
         </div>
       </div>
     </div>

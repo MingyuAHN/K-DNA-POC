@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import MissionSelector from "@/app/components/common/mission-selector";
 
@@ -19,19 +24,53 @@ import ConflictDetail from "./components/detail";
 
 export default function ConflictPage() {
   // Mission 목록
-  const [missions, setMissions] = useState<MissionResponse[]>([]);
-  const [selectedMissionId, setSelectedMissionId] = useState("");
+  const [
+    missions,
+    setMissions,
+  ] = useState<MissionResponse[]>([]);
+
+  const [
+    selectedMissionId,
+    setSelectedMissionId,
+  ] = useState("");
 
   // Conflict 목록
-  const [conflicts, setConflicts] = useState<
+  const [
+    conflicts,
+    setConflicts,
+  ] = useState<
     MissionKnowledgeConflict[]
   >([]);
-  const [selectedConflictId, setSelectedConflictId] = useState("");
+
+  const [
+    selectedConflictId,
+    setSelectedConflictId,
+  ] = useState("");
 
   // 화면 상태
-  const [isMissionLoading, setIsMissionLoading] = useState(true);
-  const [isConflictLoading, setIsConflictLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [
+    isMissionLoading,
+    setIsMissionLoading,
+  ] = useState(true);
+
+  const [
+    isConflictLoading,
+    setIsConflictLoading,
+  ] = useState(false);
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
+
+  // 오른쪽 상세 높이 측정
+  const detailRef =
+    useRef<HTMLDivElement | null>(null);
+
+  const [
+    detailHeight,
+    setDetailHeight,
+  ] = useState<number | null>(null);
 
   // Mission 목록 조회
   useEffect(() => {
@@ -42,7 +81,8 @@ export default function ConflictPage() {
         setIsMissionLoading(true);
         setErrorMessage("");
 
-        const data = await getMissions();
+        const data =
+          await getMissions();
 
         if (!isMounted) {
           return;
@@ -50,10 +90,14 @@ export default function ConflictPage() {
 
         setMissions(data.missions);
 
-        if (data.missions.length > 0) {
-          setSelectedMissionId((currentMissionId) => {
-            return currentMissionId || data.missions[0].mission_id;
-          });
+        if (
+          data.missions.length > 0
+        ) {
+          setSelectedMissionId(
+            (currentMissionId) =>
+              currentMissionId ||
+              data.missions[0].mission_id
+          );
         }
       } catch (error) {
         if (!isMounted) {
@@ -94,7 +138,10 @@ export default function ConflictPage() {
         setIsConflictLoading(true);
         setErrorMessage("");
 
-        const data = await getMissionConflicts(selectedMissionId);
+        const data =
+          await getMissionConflicts(
+            selectedMissionId
+          );
 
         if (!isMounted) {
           return;
@@ -103,7 +150,8 @@ export default function ConflictPage() {
         setConflicts(data.conflicts);
 
         setSelectedConflictId(
-          data.conflicts[0]?.conflict_id ?? ""
+          data.conflicts[0]
+            ?.conflict_id ?? ""
         );
       } catch (error) {
         if (!isMounted) {
@@ -133,25 +181,64 @@ export default function ConflictPage() {
   }, [selectedMissionId]);
 
   // 현재 선택 Mission
-  const selectedMission = useMemo(() => {
-    return (
-      missions.find(
-        (mission) => mission.mission_id === selectedMissionId
-      ) ?? null
-    );
-  }, [missions, selectedMissionId]);
+  const selectedMission =
+    useMemo(() => {
+      return (
+        missions.find(
+          (mission) =>
+            mission.mission_id ===
+            selectedMissionId
+        ) ?? null
+      );
+    }, [
+      missions,
+      selectedMissionId,
+    ]);
 
   // 현재 선택 Conflict
-  const selectedConflict = useMemo(() => {
-    return (
-      conflicts.find(
-        (conflict) =>
-          conflict.conflict_id === selectedConflictId
-      ) ??
-      conflicts[0] ??
-      null
-    );
-  }, [conflicts, selectedConflictId]);
+  const selectedConflict =
+    useMemo(() => {
+      return (
+        conflicts.find(
+          (conflict) =>
+            conflict.conflict_id ===
+            selectedConflictId
+        ) ??
+        conflicts[0] ??
+        null
+      );
+    }, [
+      conflicts,
+      selectedConflictId,
+    ]);
+
+  // 오른쪽 상세 높이 감지
+  useEffect(() => {
+    const element =
+      detailRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    const updateHeight = () => {
+      setDetailHeight(
+        element.getBoundingClientRect()
+          .height
+      );
+    };
+
+    updateHeight();
+
+    const observer =
+      new ResizeObserver(updateHeight);
+
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
@@ -171,9 +258,15 @@ export default function ConflictPage() {
         {/* Mission 선택 */}
         <MissionSelector
           missions={missions}
-          selectedMissionId={selectedMissionId}
-          onChange={setSelectedMissionId}
-          loading={isMissionLoading}
+          selectedMissionId={
+            selectedMissionId
+          }
+          onChange={
+            setSelectedMissionId
+          }
+          loading={
+            isMissionLoading
+          }
         />
 
         {/* API 오류 */}
@@ -184,19 +277,47 @@ export default function ConflictPage() {
         )}
 
         {/* Main */}
-        <div className="grid gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
-          <ConflictList
-            conflicts={conflicts}
-            selectedConflictId={selectedConflictId}
-            selectedMissionTitle={selectedMission?.title}
-            loading={isConflictLoading}
-            onSelect={setSelectedConflictId}
-          />
+        <div className="grid items-start gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
+          {/* 왼쪽 Conflict 목록 */}
+          <div
+            className="min-h-0"
+            style={{
+              height:
+                detailHeight !== null
+                  ? `${detailHeight}px`
+                  : undefined,
+            }}
+          >
+            <ConflictList
+              conflicts={
+                conflicts
+              }
+              selectedConflictId={
+                selectedConflictId
+              }
+              selectedMissionTitle={
+                selectedMission?.title
+              }
+              loading={
+                isConflictLoading
+              }
+              onSelect={
+                setSelectedConflictId
+              }
+            />
+          </div>
 
-          <ConflictDetail
-            conflict={selectedConflict}
-            mission={selectedMission}
-          />
+          {/* 오른쪽 Conflict 상세 */}
+          <div ref={detailRef}>
+            <ConflictDetail
+              conflict={
+                selectedConflict
+              }
+              mission={
+                selectedMission
+              }
+            />
+          </div>
         </div>
       </div>
     </div>

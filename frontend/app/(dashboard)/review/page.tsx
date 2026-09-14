@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -87,6 +88,15 @@ export default function ReviewPage() {
     setInfoMessage,
   ] = useState("");
 
+  // 오른쪽 Review 상세 높이 측정
+  const detailRef =
+    useRef<HTMLDivElement | null>(null);
+
+  const [
+    detailHeight,
+    setDetailHeight,
+  ] = useState<number | null>(null);
+
   // 로그인 사용자 조회
   useEffect(() => {
     const storedUser =
@@ -119,7 +129,8 @@ export default function ReviewPage() {
         setIsMissionLoading(true);
         setErrorMessage("");
 
-        const data = await getMissions();
+        const data =
+          await getMissions();
 
         if (!isMounted) {
           return;
@@ -127,7 +138,9 @@ export default function ReviewPage() {
 
         setMissions(data.missions);
 
-        if (data.missions.length > 0) {
+        if (
+          data.missions.length > 0
+        ) {
           setSelectedMissionId(
             (current) =>
               current ||
@@ -180,7 +193,9 @@ export default function ReviewPage() {
               missionId
             );
 
-          setCandidates(data.candidates);
+          setCandidates(
+            data.candidates
+          );
 
           const preferredCandidate =
             preferredCandidateId
@@ -247,6 +262,34 @@ export default function ReviewPage() {
       selectedCandidateId,
     ]);
 
+  // 오른쪽 상세 높이 감지
+  useEffect(() => {
+    const element =
+      detailRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    const updateHeight = () => {
+      setDetailHeight(
+        element.getBoundingClientRect()
+          .height
+      );
+    };
+
+    updateHeight();
+
+    const observer =
+      new ResizeObserver(updateHeight);
+
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
   // Synthesis 조회 또는 생성
   const getOrCreateSynthesisId =
     async (
@@ -277,7 +320,6 @@ export default function ReviewPage() {
       return;
     }
 
-    // 승인자 정보 확인
     if (!currentUserName) {
       setErrorMessage(
         "로그인 사용자 정보를 확인할 수 없습니다."
@@ -303,8 +345,6 @@ export default function ReviewPage() {
         {
           decision: "APPROVE",
           reason: "전문가 검토 승인",
-
-          // 실제 로그인 사용자 기록
           validated_by:
             currentUserName,
         }
@@ -387,7 +427,6 @@ export default function ReviewPage() {
       return;
     }
 
-    // 검토자 정보 확인
     if (!currentUserName) {
       setErrorMessage(
         "로그인 사용자 정보를 확인할 수 없습니다."
@@ -413,8 +452,6 @@ export default function ReviewPage() {
         {
           decision: "REJECT",
           reason: "전문가 검토 거절",
-
-          // 실제 로그인 사용자 기록
           validated_by:
             currentUserName,
         }
@@ -481,37 +518,53 @@ export default function ReviewPage() {
         )}
 
         {/* Review */}
-        <div className="grid gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
-          <CandidateList
-            candidates={candidates}
-            selectedCandidateId={
-              selectedCandidateId
-            }
-            loading={
-              isReviewLoading
-            }
-            onSelect={
-              setSelectedCandidateId
-            }
-          />
+        <div className="grid items-start gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
+          {/* 왼쪽 후보 목록 */}
+          <div
+            className="min-h-0"
+            style={{
+              height:
+                detailHeight !== null
+                  ? `${detailHeight}px`
+                  : undefined,
+            }}
+          >
+            <CandidateList
+              candidates={
+                candidates
+              }
+              selectedCandidateId={
+                selectedCandidateId
+              }
+              loading={
+                isReviewLoading
+              }
+              onSelect={
+                setSelectedCandidateId
+              }
+            />
+          </div>
 
-          <ReviewDetail
-            candidate={
-              selectedCandidate
-            }
-            processingAction={
-              processingAction
-            }
-            onApprove={
-              handleApprove
-            }
-            onSaveEdit={
-              handleSaveEdit
-            }
-            onReject={
-              handleReject
-            }
-          />
+          {/* 오른쪽 Review 상세 */}
+          <div ref={detailRef}>
+            <ReviewDetail
+              candidate={
+                selectedCandidate
+              }
+              processingAction={
+                processingAction
+              }
+              onApprove={
+                handleApprove
+              }
+              onSaveEdit={
+                handleSaveEdit
+              }
+              onReject={
+                handleReject
+              }
+            />
+          </div>
         </div>
       </div>
     </div>
