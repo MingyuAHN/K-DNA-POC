@@ -12,10 +12,11 @@ import {
   Settings2,
 } from "lucide-react";
 
-import type { MissionKnowledgeGap } from "@/services/gap";
-
 // Topic별 아이콘
-export const topicIconMap: Record<string, typeof Box> = {
+export const topicIconMap: Record<
+  string,
+  typeof Box
+> = {
   "service-boundary": Box,
   SERVICE_BOUNDARY: Box,
 
@@ -48,19 +49,28 @@ export const dimensionIconMap: Record<
 };
 
 // Dimension 한글 표시
-export const dimensionLabelMap: Record<string, string> = {
+export const dimensionLabelMap: Record<
+  string,
+  string
+> = {
   WHAT: "무엇을 (WHAT)",
   WHY: "왜 (WHY)",
   WHEN: "언제 (WHEN)",
   HOW: "어떻게 (HOW)",
   SIGNAL: "판단 신호 (SIGNAL)",
-  EXCEPTION: "예외 조건 (EXCEPTION)",
-  FAILURE: "실패 사례 (FAILURE)",
-  TRADE_OFF: "트레이드오프 (TRADE_OFF)",
+  EXCEPTION:
+    "예외 조건 (EXCEPTION)",
+  FAILURE:
+    "실패 사례 (FAILURE)",
+  TRADE_OFF:
+    "트레이드오프 (TRADE_OFF)",
 };
 
 // Gap Type 한글 표시
-export const gapTypeLabelMap: Record<string, string> = {
+export const gapTypeLabelMap: Record<
+  string,
+  string
+> = {
   MISSING: "지식 부족",
   INCOMPLETE: "불완전",
   UNCERTAIN: "불확실",
@@ -68,38 +78,31 @@ export const gapTypeLabelMap: Record<string, string> = {
 };
 
 // Topic 표시
-export function formatTopic(topic: string) {
+export function formatTopic(
+  topic: string
+) {
   return topic
     .replaceAll("_", " ")
     .replaceAll("-", " ")
-    .replace(/\b\w/g, (value) => value.toUpperCase());
+    .replace(
+      /\b\w/g,
+      (value) =>
+        value.toUpperCase()
+    );
 }
 
 // Gap Score 표시
-export function formatGapScore(score: number | null) {
-  if (score === null || score === undefined) {
+export function formatGapScore(
+  score: number | null
+) {
+  if (
+    score === null ||
+    score === undefined
+  ) {
     return "-";
   }
 
-  return `${Math.round(score * 100)}%`;
-}
-
-// Topic별 평균 Gap Score
-export function getAverageGapScore(
-  items: MissionKnowledgeGap[]
-) {
-  const scores = items
-    .map((item) => item.gap_score)
-    .filter((score): score is number => score !== null);
-
-  if (scores.length === 0) {
-    return null;
-  }
-
-  return (
-    scores.reduce(
-      (sum, score) => sum + score,
-      0
-    ) / scores.length
-  );
+  return `${Math.round(
+    score * 100
+  )}%`;
 }

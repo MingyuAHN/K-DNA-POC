@@ -55,6 +55,12 @@ export default function ReviewPage() {
     setSelectedCandidateId,
   ] = useState("");
 
+  // 현재 로그인 사용자
+  const [
+    currentUserName,
+    setCurrentUserName,
+  ] = useState("");
+
   // 화면 상태
   const [
     isMissionLoading,
@@ -80,6 +86,29 @@ export default function ReviewPage() {
     infoMessage,
     setInfoMessage,
   ] = useState("");
+
+  // 로그인 사용자 조회
+  useEffect(() => {
+    const storedUser =
+      localStorage.getItem("user");
+
+    if (!storedUser) {
+      return;
+    }
+
+    try {
+      const user =
+        JSON.parse(storedUser);
+
+      setCurrentUserName(
+        typeof user?.name === "string"
+          ? user.name
+          : ""
+      );
+    } catch {
+      setCurrentUserName("");
+    }
+  }, []);
 
   // Mission 조회
   useEffect(() => {
@@ -248,6 +277,14 @@ export default function ReviewPage() {
       return;
     }
 
+    // 승인자 정보 확인
+    if (!currentUserName) {
+      setErrorMessage(
+        "로그인 사용자 정보를 확인할 수 없습니다."
+      );
+      return;
+    }
+
     try {
       setProcessingAction(
         "APPROVE"
@@ -266,7 +303,10 @@ export default function ReviewPage() {
         {
           decision: "APPROVE",
           reason: "전문가 검토 승인",
-          validated_by: "changtest",
+
+          // 실제 로그인 사용자 기록
+          validated_by:
+            currentUserName,
         }
       );
 
@@ -347,6 +387,14 @@ export default function ReviewPage() {
       return;
     }
 
+    // 검토자 정보 확인
+    if (!currentUserName) {
+      setErrorMessage(
+        "로그인 사용자 정보를 확인할 수 없습니다."
+      );
+      return;
+    }
+
     try {
       setProcessingAction(
         "REJECT"
@@ -365,7 +413,10 @@ export default function ReviewPage() {
         {
           decision: "REJECT",
           reason: "전문가 검토 거절",
-          validated_by: "changtest",
+
+          // 실제 로그인 사용자 기록
+          validated_by:
+            currentUserName,
         }
       );
 

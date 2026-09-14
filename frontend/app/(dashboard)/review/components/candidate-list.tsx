@@ -3,7 +3,6 @@
 import type { KnowledgeReviewCandidate } from "@/services/review";
 
 import {
-  formatConfidence,
   formatKnowledgeType,
 } from "../utils";
 
@@ -102,21 +101,6 @@ export default function CandidateList({
                       candidate.statement
                     }
                   </p>
-
-                  {/* Confidence */}
-                  <div className="mt-4 flex items-center justify-end">
-                    <span
-                      className="text-[11px] font-bold text-slate-400"
-                      title="AI가 추출한 지식 후보의 신뢰도입니다. 최종 확정 여부는 전문가 검토로 결정됩니다."
-                    >
-                      후보 신뢰도{" "}
-                      <span className="font-black text-blue-600">
-                        {formatConfidence(
-                          candidate.confidence_score
-                        )}
-                      </span>
-                    </span>
-                  </div>
                 </button>
               );
             }

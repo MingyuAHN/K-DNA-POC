@@ -1,5 +1,6 @@
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://127.0.0.1:8000";
 
 // Mission Gap 타입
 export type MissionKnowledgeGap = {
@@ -29,7 +30,9 @@ async function getErrorMessage(
   try {
     const data = await response.json();
 
-    if (typeof data?.detail === "string") {
+    if (
+      typeof data?.detail === "string"
+    ) {
       return data.detail;
     }
 
@@ -48,7 +51,8 @@ export async function getMissionGaps(
     {
       method: "GET",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type":
+          "application/json",
       },
       cache: "no-store",
     }

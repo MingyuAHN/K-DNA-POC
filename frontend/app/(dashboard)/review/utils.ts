@@ -9,14 +9,3 @@ export function formatKnowledgeType(
       char.toUpperCase()
     );
 }
-
-// 신뢰도 표시
-export function formatConfidence(
-  value: number | null
-) {
-  if (value === null) {
-    return "-";
-  }
-
-  return `${Math.round(value * 100)}%`;
-}

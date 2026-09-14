@@ -30,7 +30,6 @@ import type {
 } from "@/services/review";
 
 import {
-  formatConfidence,
   formatKnowledgeType,
 } from "../utils";
 
@@ -312,22 +311,6 @@ export default function ReviewDetail({
                 검토 대기
               </span>
             </div>
-          </div>
-
-          {/* Candidate Confidence */}
-          <div
-            className="shrink-0 rounded-2xl bg-blue-50 px-4 py-3"
-            title="AI가 추출한 지식 후보의 신뢰도입니다. 최종 확정 여부는 전문가 검토로 결정됩니다."
-          >
-            <p className="text-[10px] font-bold text-slate-400">
-              후보 신뢰도
-            </p>
-
-            <p className="mt-0.5 text-lg font-black text-blue-600">
-              {formatConfidence(
-                candidate.confidence_score
-              )}
-            </p>
           </div>
         </div>
       </div>

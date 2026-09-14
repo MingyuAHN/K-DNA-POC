@@ -60,7 +60,7 @@ export default function GapPage() {
     setErrorMessage,
   ] = useState("");
 
-  // 실제 Mission 목록 조회
+  // Mission 목록 조회
   useEffect(() => {
     let isMounted = true;
 
@@ -76,22 +76,16 @@ export default function GapPage() {
           return;
         }
 
-        setMissions(
-          data.missions
-        );
+        setMissions(data.missions);
 
         // 첫 Mission 기본 선택
         if (
           data.missions.length > 0
         ) {
           setSelectedMissionId(
-            (current) => {
-              return (
-                current ||
-                data.missions[0]
-                  .mission_id
-              );
-            }
+            (current) =>
+              current ||
+              data.missions[0].mission_id
           );
         }
       } catch (error) {
@@ -106,9 +100,7 @@ export default function GapPage() {
         );
       } finally {
         if (isMounted) {
-          setIsMissionLoading(
-            false
-          );
+          setIsMissionLoading(false);
         }
       }
     };
@@ -120,7 +112,7 @@ export default function GapPage() {
     };
   }, []);
 
-  // 선택 Mission의 실제 Gap 조회
+  // 선택 Mission Gap 조회
   useEffect(() => {
     if (!selectedMissionId) {
       setGaps([]);
@@ -165,9 +157,7 @@ export default function GapPage() {
         );
       } finally {
         if (isMounted) {
-          setIsGapLoading(
-            false
-          );
+          setIsGapLoading(false);
         }
       }
     };
@@ -194,7 +184,7 @@ export default function GapPage() {
       selectedMissionId,
     ]);
 
-  // Topic별 Gap 그룹화
+  // Topic exact match 기준 그룹화
   const topicGroups =
     useMemo(() => {
       const map =
@@ -225,7 +215,7 @@ export default function GapPage() {
       );
     }, [gaps]);
 
-  // 선택 Topic의 Gap 목록
+  // 선택 Topic Gap 목록
   const selectedTopicGaps =
     useMemo(() => {
       return gaps.filter(
@@ -248,8 +238,7 @@ export default function GapPage() {
           </h1>
 
           <p className="mt-1 text-sm font-semibold text-slate-500">
-            현재 Mission에서 지식이 부족하거나 추가 확인이 필요한 항목을
-            확인합니다.
+            Mission의 인터뷰 과정에서 탐지된 Knowledge Gap 이력을 확인합니다.
           </p>
         </header>
 
@@ -274,7 +263,7 @@ export default function GapPage() {
           </div>
         )}
 
-        {/* Gap 분석 영역 */}
+        {/* Gap 이력 */}
         <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
           <TopicList
             topicGroups={
