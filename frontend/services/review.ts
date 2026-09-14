@@ -19,6 +19,10 @@ export type KnowledgeType =
   | "TRADE_OFF"
   | "EXPERT_OPINION";
 
+// Validation Confidence 상세
+export type ValidationBreakdown =
+  Record<string, number>;
+
 export type ReviewEvidence = {
   source_type: string;
   source_id: string;
@@ -42,7 +46,15 @@ export type KnowledgeReviewCandidate = {
   evidence: ReviewEvidence | null;
 
   novelty_score: number | null;
+
+  // Candidate 추출 단계 AI Confidence
   confidence_score: number | null;
+
+  // Evidence / Context 기반 Validation Confidence
+  validation_confidence: number | null;
+  validation_breakdown: ValidationBreakdown | null;
+  validation_method_version: string | null;
+
   validation_status: string;
 
   review_status: string;
@@ -67,7 +79,9 @@ export type KnowledgeCandidateEditRequest = {
   statement?: string;
   knowledge_type?: KnowledgeType;
   context?: Record<string, unknown>;
-  decision_rule?: Record<string, unknown> | null;
+  decision_rule?:
+    | Record<string, unknown>
+    | null;
   rationale?: string | null;
   exception?: string | null;
   edit_reason?: string | null;
@@ -81,11 +95,19 @@ export type KnowledgeCandidateEditResponse = {
   statement: string;
   knowledge_type: string;
   context: Record<string, unknown>;
-  decision_rule: Record<string, unknown> | null;
+  decision_rule:
+    | Record<string, unknown>
+    | null;
   rationale: string | null;
   exception: string | null;
 
   validation_status: string;
+
+  // 수정 후 재계산된 Validation Confidence
+  validation_confidence: number | null;
+  validation_breakdown: ValidationBreakdown | null;
+  validation_method_version: string | null;
+
   review_status: string;
   review_reason: string | null;
   review_synthesis_id: string | null;
@@ -106,7 +128,9 @@ export type SynthesizedKnowledgeUnit = {
   type: string;
 
   context: Record<string, unknown>;
-  decision_rule: Record<string, unknown> | null;
+  decision_rule:
+    | Record<string, unknown>
+    | null;
 
   rationale: string | null;
   exception: string | null;

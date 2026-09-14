@@ -76,6 +76,11 @@ export default function ReviewDetail({
   const [isEditing, setIsEditing] =
     useState(false);
 
+  const [
+    isValidationOpen,
+    setIsValidationOpen,
+  ] = useState(false);
+
   const [statement, setStatement] =
     useState("");
 
@@ -124,6 +129,7 @@ export default function ReviewDetail({
 
     resetEditValues(candidate);
     setIsEditing(false);
+    setIsValidationOpen(false);
   }, [candidate]);
 
   if (!candidate) {
@@ -291,27 +297,23 @@ export default function ReviewDetail({
   };
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       {/* 선택한 지식 후보 요약 */}
       <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-[11px] font-black text-blue-500">
-              선택한 지식 후보
-            </p>
+        <p className="text-[11px] font-black text-blue-500">
+          선택한 지식 후보
+        </p>
 
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-black text-slate-900">
-                {formatKnowledgeType(
-                  candidate.knowledge_type
-                )}
-              </h2>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-black text-slate-900">
+            {formatKnowledgeType(
+              candidate.knowledge_type
+            )}
+          </h2>
 
-              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-700">
-                검토 대기
-              </span>
-            </div>
-          </div>
+          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-700">
+            검토 대기
+          </span>
         </div>
       </div>
 
@@ -403,6 +405,27 @@ export default function ReviewDetail({
           <EvidenceCard
             evidence={candidate.evidence}
           />
+
+          {/* Validation Confidence */}
+          <ValidationConfidenceCard
+            confidence={
+              candidate.validation_confidence
+            }
+            breakdown={
+              candidate.validation_breakdown
+            }
+            methodVersion={
+              candidate.validation_method_version
+            }
+            isOpen={
+              isValidationOpen
+            }
+            onToggle={() =>
+              setIsValidationOpen(
+                (current) => !current
+              )
+            }
+          />
         </>
       )}
 
@@ -480,7 +503,7 @@ function ContextCard({
   );
 
   return (
-    <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
       <SectionHeader
         icon={FileText}
         title="적용 맥락"
@@ -491,21 +514,32 @@ function ContextCard({
           등록된 적용 맥락이 없습니다.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-100">
-          {rows.map((row) => (
-            <div
-              key={row.label}
-              className="grid gap-1 border-b border-slate-100 px-4 py-3 last:border-b-0 sm:grid-cols-[110px_minmax(0,1fr)]"
-            >
-              <p className="text-xs font-black text-slate-400">
-                {row.label}
-              </p>
+        /* 적용 맥락 2열 */
+        <div className="grid overflow-hidden rounded-xl border border-slate-100 md:grid-cols-2">
+          {rows.map((row) => {
+            const isWide =
+              row.key === "constraints" ||
+              row.key === "tags";
 
-              <p className="text-sm font-semibold leading-6 text-slate-700">
-                {row.value}
-              </p>
-            </div>
-          ))}
+            return (
+              <div
+                key={row.key}
+                className={`border-b border-slate-100 px-4 py-3 md:border-r ${
+                  isWide
+                    ? "md:col-span-2 md:border-r-0"
+                    : "odd:md:border-r"
+                }`}
+              >
+                <p className="text-[11px] font-black text-slate-400">
+                  {row.label}
+                </p>
+
+                <p className="mt-1 text-sm font-semibold leading-5 text-slate-700">
+                  {row.value}
+                </p>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -540,46 +574,62 @@ function DecisionRuleCard({
     Boolean(thenRule) ||
     unlessConditions.length > 0;
 
+  // 규칙 없음
+  if (!hasRule) {
+    return (
+      <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+            <ShieldCheck className="h-4 w-4" />
+          </div>
+
+          <p className="text-sm font-black text-slate-900">
+            판단 규칙
+          </p>
+
+          <span className="text-sm font-semibold text-slate-400">
+            없음
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // 규칙 있음
   return (
-    <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
       <SectionHeader
         icon={ShieldCheck}
         title="판단 규칙"
       />
 
-      {!hasRule ? (
-        <p className="text-sm font-semibold text-slate-400">
-          없음
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {ifConditions.length > 0 && (
-            <RuleRow
-              label="IF"
-              content={ifConditions.join(
-                "\n"
-              )}
-            />
-          )}
+      <div className="space-y-2">
+        {ifConditions.length > 0 && (
+          <RuleRow
+            label="IF"
+            content={ifConditions.join(
+              "\n"
+            )}
+          />
+        )}
 
-          {thenRule && (
-            <RuleRow
-              label="THEN"
-              content={thenRule}
-            />
-          )}
+        {thenRule && (
+          <RuleRow
+            label="THEN"
+            content={thenRule}
+          />
+        )}
 
-          {unlessConditions.length >
-            0 && (
-            <RuleRow
-              label="UNLESS"
-              content={unlessConditions.join(
-                "\n"
-              )}
-            />
-          )}
-        </div>
-      )}
+        {unlessConditions.length >
+          0 && (
+          <RuleRow
+            label="UNLESS"
+            content={unlessConditions.join(
+              "\n"
+            )}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -592,12 +642,12 @@ function RuleRow({
   content: string;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
-      <span className="w-14 shrink-0 text-xs font-black text-blue-600">
+    <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-2.5">
+      <span className="w-14 shrink-0 pt-0.5 text-xs font-black text-blue-600">
         {label}
       </span>
 
-      <p className="whitespace-pre-line text-sm font-semibold leading-6 text-slate-700">
+      <p className="whitespace-pre-line text-sm font-semibold leading-5 text-slate-700">
         {content}
       </p>
     </div>
@@ -617,7 +667,7 @@ function EvidenceCard({
     );
 
   return (
-    <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
       <SectionHeader
         icon={FileSearch}
         title="근거"
@@ -633,11 +683,132 @@ function EvidenceCard({
             {sourceLabel}
           </span>
 
-          <p className="mt-3 whitespace-pre-line text-sm font-semibold leading-7 text-slate-700">
+          <p className="mt-2.5 whitespace-pre-line text-sm font-semibold leading-6 text-slate-700">
             {evidence.source_text ||
               "근거 내용이 없습니다."}
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+type ValidationConfidenceCardProps = {
+  confidence: number | null;
+  breakdown:
+    | Record<string, number>
+    | null;
+  methodVersion: string | null;
+  isOpen: boolean;
+  onToggle: () => void;
+};
+
+function ValidationConfidenceCard({
+  confidence,
+  breakdown,
+  methodVersion,
+  isOpen,
+  onToggle,
+}: ValidationConfidenceCardProps) {
+  const rows =
+    buildValidationRows(
+      breakdown
+    );
+
+  return (
+    <div className="overflow-hidden rounded-[22px] border border-blue-100 bg-white shadow-sm">
+      {/* Validation 요약 */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-blue-50/40"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+            <ShieldCheck className="h-4 w-4" />
+          </div>
+
+          <div className="min-w-0">
+            <p className="text-sm font-black text-slate-900">
+              검증 신뢰도
+            </p>
+
+            <p className="mt-0.5 text-[11px] font-semibold text-slate-400">
+              Evidence와 Context 기반 평가 결과입니다.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-xl font-black text-blue-600">
+            {formatValidationScore(
+              confidence
+            )}
+          </span>
+
+          <ChevronDown
+            className={`h-4 w-4 text-slate-400 transition-transform ${
+              isOpen
+                ? "rotate-180"
+                : ""
+            }`}
+          />
+        </div>
+      </button>
+
+      {/* Validation 상세 */}
+      {isOpen && (
+        <div className="border-t border-blue-100 bg-slate-50/50 px-4 py-4">
+          {rows.length > 0 ? (
+            <div className="grid gap-2 md:grid-cols-2">
+              {rows.map((row) => (
+                <div
+                  key={row.key}
+                  className="rounded-xl border border-slate-100 bg-white px-3.5 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold text-slate-600">
+                      {row.label}
+                    </p>
+
+                    <span className="text-xs font-black text-blue-600">
+                      {formatValidationScore(
+                        row.value
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-blue-500"
+                      style={{
+                        width: `${getScorePercent(
+                          row.value
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm font-semibold text-slate-400">
+              세부 검증 점수가 없습니다.
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+            <p className="text-[11px] font-semibold text-slate-400">
+              검증 신뢰도와 관계없이 최종 반영은 전문가 검토 후 결정됩니다.
+            </p>
+
+            {methodVersion && (
+              <span className="rounded-full bg-slate-200/70 px-2.5 py-1 text-[10px] font-black text-slate-500">
+                Method {methodVersion}
+              </span>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -652,20 +823,39 @@ function CompactContentCard({
   icon: typeof CircleX;
   content: string;
 }) {
+  const isEmpty =
+    content === "없음";
+
+  // 내용 없음
+  if (isEmpty) {
+    return (
+      <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+            <Icon className="h-4 w-4" />
+          </div>
+
+          <p className="text-sm font-black text-slate-900">
+            {title}
+          </p>
+
+          <span className="text-sm font-semibold text-slate-400">
+            없음
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // 내용 있음
   return (
-    <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
       <SectionHeader
         icon={Icon}
         title={title}
       />
 
-      <p
-        className={`text-sm font-semibold leading-6 ${
-          content === "없음"
-            ? "text-slate-400"
-            : "text-slate-700"
-        }`}
-      >
+      <p className="text-sm font-semibold leading-6 text-slate-700">
         {content}
       </p>
     </div>
@@ -685,7 +875,7 @@ function ContentCard({
 }) {
   return (
     <div
-      className={`rounded-[22px] border p-5 shadow-sm ${
+      className={`rounded-[22px] border p-4 shadow-sm ${
         highlight
           ? "border-blue-100 bg-blue-50/50"
           : "border-slate-200 bg-white"
@@ -697,7 +887,7 @@ function ContentCard({
         highlight={highlight}
       />
 
-      <p className="whitespace-pre-line break-words text-sm font-semibold leading-7 text-slate-700">
+      <p className="whitespace-pre-line break-words text-sm font-semibold leading-6 text-slate-700">
         {content}
       </p>
     </div>
@@ -714,9 +904,9 @@ function SectionHeader({
   highlight?: boolean;
 }) {
   return (
-    <div className="mb-4 flex items-center gap-3">
+    <div className="mb-3 flex items-center gap-3">
       <div
-        className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+        className={`flex h-8 w-8 items-center justify-center rounded-lg ${
           highlight
             ? "bg-blue-100 text-blue-600"
             : "bg-slate-100 text-slate-600"
@@ -1249,6 +1439,7 @@ function buildContextRows(
       }
 
       return {
+        key,
         label: labelMap[key] ?? key,
         value: displayValue,
       };
@@ -1257,10 +1448,93 @@ function buildContextRows(
       (
         row
       ): row is {
+        key: string;
         label: string;
         value: string;
       } => row !== null
     );
+}
+
+// Validation 상세 표시
+function buildValidationRows(
+  breakdown:
+    | Record<string, number>
+    | null
+) {
+  if (!breakdown) {
+    return [];
+  }
+
+  const keys = [
+    "evidence_support",
+    "source_independence",
+    "cross_expert_agreement",
+    "context_completeness",
+    "exception_completeness",
+    "outcome_evidence",
+    "recency",
+  ];
+
+  const labels: Record<
+    string,
+    string
+  > = {
+    evidence_support:
+      "Evidence Support",
+    source_independence:
+      "Source Independence",
+    cross_expert_agreement:
+      "Cross-Expert Agreement",
+    context_completeness:
+      "Context Completeness",
+    exception_completeness:
+      "Exception Completeness",
+    outcome_evidence:
+      "Outcome Evidence",
+    recency:
+      "Recency",
+  };
+
+  return keys
+    .filter(
+      (key) =>
+        typeof breakdown[key] ===
+        "number"
+    )
+    .map((key) => ({
+      key,
+      label: labels[key] ?? key,
+      value: breakdown[key],
+    }));
+}
+
+// Validation 점수 표시
+function formatValidationScore(
+  value: number | null
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "-";
+  }
+
+  return `${Math.round(
+    value * 100
+  )}%`;
+}
+
+// Progress 범위 보정
+function getScorePercent(
+  value: number
+) {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(value * 100)
+    )
+  );
 }
 
 function getEvidenceSourceLabel(
