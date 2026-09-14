@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import MissionSelector from "@/app/components/common/mission-selector";
 
@@ -19,8 +18,6 @@ import ConflictList from "./components/list";
 import ConflictDetail from "./components/detail";
 
 export default function ConflictPage() {
-  const router = useRouter();
-
   // Mission 목록
   const [missions, setMissions] = useState<MissionResponse[]>([]);
   const [selectedMissionId, setSelectedMissionId] = useState("");
@@ -156,26 +153,6 @@ export default function ConflictPage() {
     );
   }, [conflicts, selectedConflictId]);
 
-  // 추천 질문을 Interview 화면으로 전달
-  const handleAskExpert = () => {
-    if (
-      !selectedMissionId ||
-      !selectedConflict ||
-      !selectedConflict.recommended_question
-    ) {
-      return;
-    }
-
-    const params = new URLSearchParams({
-      missionId: selectedMissionId,
-      interviewId: selectedConflict.interview_id,
-      conflictId: selectedConflict.conflict_id,
-      question: selectedConflict.recommended_question,
-    });
-
-    router.push(`/interview?${params.toString()}`);
-  };
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] p-3 text-slate-900 sm:p-4 lg:p-6">
       <div className="mx-auto max-w-[1500px] space-y-5">
@@ -186,8 +163,8 @@ export default function ConflictPage() {
           </h1>
 
           <p className="mt-1 text-sm font-semibold text-slate-500">
-            전문가 발언과 기존 지식·프로젝트 근거 사이의 충돌 원인과
-            조건을 확인합니다.
+            전문가 발언과 기존 지식·근거를 비교하여 충돌 여부와 적용
+            맥락의 차이를 확인합니다.
           </p>
         </header>
 
@@ -219,7 +196,6 @@ export default function ConflictPage() {
           <ConflictDetail
             conflict={selectedConflict}
             mission={selectedMission}
-            onAskExpert={handleAskExpert}
           />
         </div>
       </div>

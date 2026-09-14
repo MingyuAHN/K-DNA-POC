@@ -24,24 +24,22 @@ export default function CandidateList({
 }: CandidateListProps) {
   return (
     <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-black text-slate-900">
-              지식 후보 목록
-            </h2>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-black text-slate-900">
+            지식 후보 목록
+          </h2>
 
-            <p className="mt-1 text-[11px] font-semibold text-slate-400">
-              Knowledge Review Candidates
-            </p>
-          </div>
-
-          {!loading && (
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500">
-              {candidates.length}건
-            </span>
-          )}
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            전문가 검토가 필요한 지식 후보입니다.
+          </p>
         </div>
+
+        {!loading && (
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500">
+            {candidates.length}건
+          </span>
+        )}
       </div>
 
       {loading ? (
@@ -87,34 +85,36 @@ export default function CandidateList({
                       : "border-slate-100 bg-slate-50/70 hover:border-slate-200 hover:bg-slate-50"
                   }`}
                 >
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <span className="max-w-[190px] truncate text-[10px] font-black text-slate-400">
-                      {
-                        candidate.candidate_id
-                      }
-                    </span>
-
-                    <StatusBadge />
-                  </div>
-
-                  <p className="line-clamp-2 text-sm font-black leading-5 text-slate-900">
-                    {
-                      candidate.statement
-                    }
-                  </p>
-
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600">
+                  {/* 지식 유형 + 상태 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-600">
                       {formatKnowledgeType(
                         candidate.knowledge_type
                       )}
                     </span>
 
-                    <span className="shrink-0 text-[11px] font-black text-blue-600">
-                      신뢰도{" "}
-                      {formatConfidence(
-                        candidate.confidence_score
-                      )}
+                    <StatusBadge />
+                  </div>
+
+                  {/* Candidate 내용 */}
+                  <p className="mt-3 line-clamp-3 text-sm font-black leading-6 text-slate-900">
+                    {
+                      candidate.statement
+                    }
+                  </p>
+
+                  {/* Confidence */}
+                  <div className="mt-4 flex items-center justify-end">
+                    <span
+                      className="text-[11px] font-bold text-slate-400"
+                      title="AI가 추출한 지식 후보의 신뢰도입니다. 최종 확정 여부는 전문가 검토로 결정됩니다."
+                    >
+                      후보 신뢰도{" "}
+                      <span className="font-black text-blue-600">
+                        {formatConfidence(
+                          candidate.confidence_score
+                        )}
+                      </span>
                     </span>
                   </div>
                 </button>
