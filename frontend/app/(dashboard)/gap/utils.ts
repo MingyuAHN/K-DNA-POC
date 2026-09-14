@@ -53,17 +53,14 @@ export const dimensionLabelMap: Record<
   string,
   string
 > = {
-  WHAT: "무엇을 (WHAT)",
-  WHY: "왜 (WHY)",
-  WHEN: "언제 (WHEN)",
-  HOW: "어떻게 (HOW)",
-  SIGNAL: "판단 신호 (SIGNAL)",
-  EXCEPTION:
-    "예외 조건 (EXCEPTION)",
-  FAILURE:
-    "실패 사례 (FAILURE)",
-  TRADE_OFF:
-    "트레이드오프 (TRADE_OFF)",
+  WHAT: "무엇을",
+  WHY: "왜",
+  WHEN: "언제",
+  HOW: "어떻게",
+  SIGNAL: "판단 신호",
+  EXCEPTION: "예외 조건",
+  FAILURE: "실패 사례",
+  TRADE_OFF: "트레이드오프",
 };
 
 // Gap Type 한글 표시
@@ -71,10 +68,26 @@ export const gapTypeLabelMap: Record<
   string,
   string
 > = {
+  // 기존 타입
   MISSING: "지식 부족",
   INCOMPLETE: "불완전",
   UNCERTAIN: "불확실",
   LOW_EVIDENCE: "근거 부족",
+
+  // 현재 Gap 분석 타입
+  MISSING_KNOWLEDGE: "지식 부족",
+  MISSING_SIGNAL:
+    "판단 신호 부족",
+  MISSING_EXCEPTION:
+    "예외 정보 부족",
+  MISSING_EVIDENCE:
+    "근거 부족",
+  MISSING_CONTEXT:
+    "맥락 정보 부족",
+  MISSING_FAILURE:
+    "실패 사례 부족",
+  MISSING_TRADE_OFF:
+    "트레이드오프 부족",
 };
 
 // Topic 표시

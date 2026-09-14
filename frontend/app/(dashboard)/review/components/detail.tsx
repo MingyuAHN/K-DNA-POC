@@ -606,7 +606,7 @@ function DecisionRuleCard({
       <div className="space-y-2">
         {ifConditions.length > 0 && (
           <RuleRow
-            label="IF"
+            label="조건"
             content={ifConditions.join(
               "\n"
             )}
@@ -615,7 +615,7 @@ function DecisionRuleCard({
 
         {thenRule && (
           <RuleRow
-            label="THEN"
+            label="결과"
             content={thenRule}
           />
         )}
@@ -623,7 +623,7 @@ function DecisionRuleCard({
         {unlessConditions.length >
           0 && (
           <RuleRow
-            label="UNLESS"
+            label="예외"
             content={unlessConditions.join(
               "\n"
             )}
@@ -734,7 +734,7 @@ function ValidationConfidenceCard({
             </p>
 
             <p className="mt-0.5 text-[11px] font-semibold text-slate-400">
-              Evidence와 Context 기반 평가 결과입니다.
+              근거와 적용 맥락을 기반으로 평가한 결과입니다.
             </p>
           </div>
         </div>
@@ -797,16 +797,10 @@ function ValidationConfidenceCard({
             </p>
           )}
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+          <div className="mt-4 border-t border-slate-200 pt-3">
             <p className="text-[11px] font-semibold text-slate-400">
               검증 신뢰도와 관계없이 최종 반영은 전문가 검토 후 결정됩니다.
             </p>
-
-            {methodVersion && (
-              <span className="rounded-full bg-slate-200/70 px-2.5 py-1 text-[10px] font-black text-slate-500">
-                Method {methodVersion}
-              </span>
-            )}
           </div>
         </div>
       )}
@@ -1480,19 +1474,19 @@ function buildValidationRows(
     string
   > = {
     evidence_support:
-      "Evidence Support",
+      "근거 충실성",
     source_independence:
-      "Source Independence",
+      "출처 독립성",
     cross_expert_agreement:
-      "Cross-Expert Agreement",
+      "전문가 간 일치도",
     context_completeness:
-      "Context Completeness",
+      "맥락 완전성",
     exception_completeness:
-      "Exception Completeness",
+      "예외 완전성",
     outcome_evidence:
-      "Outcome Evidence",
+      "결과 근거",
     recency:
-      "Recency",
+      "최신성",
   };
 
   return keys
