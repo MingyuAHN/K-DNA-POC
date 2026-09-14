@@ -22,6 +22,10 @@ from app.services.conflict_normalization_service import (
     resolve_conflict_source_type,
     select_visible_conflict_ids,
 )
+from app.services.gap_normalization_service import (
+    build_gap_canonicalization_record,
+    select_visible_gap_ids,
+)
 from app.services.mission_service import get_mission
 
 
@@ -48,6 +52,13 @@ def get_mission_gaps(
     """
     Mission에 속한 모든 Interview에서 생성된
     Knowledge Gap을 통합 조회한다.
+
+    Detection History는 DB와 InterviewAnalysis.raw_response에
+    그대로 보존한다.
+
+    Mission Gap 화면에서는 같은 Interview 내 cross-turn 기준으로
+    strict duplicate와 strong semantic family를 canonicalize하여
+    같은 문제의 발전형은 최신 Gap 하나만 노출한다.
 
     최신 Gap부터 반환한다.
     """
@@ -77,25 +88,61 @@ def get_mission_gaps(
         .all()
     )
 
-    gaps = [
-        MissionKnowledgeGapResponse(
-            gap_id=gap.gap_id,
-            mission_id=analysis.mission_id,
-            interview_id=analysis.interview_id,
-            analysis_id=analysis.analysis_id,
-            topic=gap.topic,
+    if not rows:
+        return MissionKnowledgeGapListResponse(
+            total=0,
+            gaps=[],
+        )
+
+    canonicalization_records = [
+        build_gap_canonicalization_record(
+            gap_id=str(
+                gap.gap_id
+            ),
+            interview_id=str(
+                analysis.interview_id
+            ),
             dimension=gap.dimension,
             gap_type=gap.gap_type,
-            gap_score=(
-                float(gap.gap_score)
-                if gap.gap_score is not None
-                else None
-            ),
+            topic=gap.topic,
             reason=gap.reason,
-            created_at=gap.created_at,
         )
         for gap, analysis in rows
     ]
+
+    visible_gap_ids = (
+        select_visible_gap_ids(
+            canonicalization_records
+        )
+    )
+
+    gaps = []
+
+    for gap, analysis in rows:
+        if (
+            str(gap.gap_id)
+            not in visible_gap_ids
+        ):
+            continue
+
+        gaps.append(
+            MissionKnowledgeGapResponse(
+                gap_id=gap.gap_id,
+                mission_id=analysis.mission_id,
+                interview_id=analysis.interview_id,
+                analysis_id=analysis.analysis_id,
+                topic=gap.topic,
+                dimension=gap.dimension,
+                gap_type=gap.gap_type,
+                gap_score=(
+                    float(gap.gap_score)
+                    if gap.gap_score is not None
+                    else None
+                ),
+                reason=gap.reason,
+                created_at=gap.created_at,
+            )
+        )
 
     return MissionKnowledgeGapListResponse(
         total=len(gaps),
@@ -114,7 +161,12 @@ def get_mission_conflicts(
     Detection History는 DB에 그대로 보존한다.
 
     Mission Conflict 화면에서는:
-    - 동일 Conflict 반복 노출 억제
+    - 같은 Interview의 cross-turn 반복 Conflict 노출 억제
+    - Database isolation 원칙 ↔ Migration/Incident 예외처럼
+      strong semantic family가 같은 Conflict는 source 조합이 달라도
+      최신 Turn의 가장 정보량 높은 row를 대표값으로 사용
+    - family를 만들 수 없는 Conflict는 기존 source/description
+      canonicalization 정책으로 fallback
     - atomic Conflict들의 단순 합집합인
       composite Conflict 노출 억제
     - Conflict Source provenance 정규화
@@ -281,6 +333,15 @@ def get_mission_conflicts(
                     conflict.conflict_id,
                     [],
                 )
+            ),
+            context_difference=(
+                conflict.context_difference
+            ),
+            analysis_id=str(
+                analysis.analysis_id
+            ),
+            severity=(
+                conflict.severity
             ),
         )
         for conflict, analysis in rows

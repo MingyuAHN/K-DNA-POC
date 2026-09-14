@@ -456,3 +456,196 @@ def test_different_interviews_are_not_deduplicated():
         "conflict-1",
         "conflict-2",
     }
+
+def test_cross_turn_same_semantic_sources_with_different_evidence_keep_newest():
+    common_semantic_source = (
+        BASELINE_CLAIM_SOURCE_TYPE,
+        "claim-shared-db",
+        "Shared Database 사용을 금지한다.",
+    )
+
+    newest = (
+        build_conflict_canonicalization_record(
+            conflict_id="newest",
+            interview_id="interview-1",
+            conflict_type=(
+                "CONDITIONAL_CONFLICT"
+            ),
+            description=(
+                "Shared Database 금지 원칙과 "
+                "전환 초기 한시적 예외가 "
+                "조건부로 충돌한다."
+            ),
+            sources=[
+                common_semantic_source,
+                (
+                    EVIDENCE_SOURCE_TYPE,
+                    "chunk-new",
+                    "최신 인터뷰 근거",
+                ),
+            ],
+            context_difference=(
+                "초기 Migration 단계의 "
+                "Shared Database 예외 조건"
+            ),
+        )
+    )
+
+    older = (
+        build_conflict_canonicalization_record(
+            conflict_id="older",
+            interview_id="interview-1",
+            conflict_type=(
+                "CONDITIONAL_CONFLICT"
+            ),
+            description=(
+                "Shared Database 금지 원칙과 "
+                "초기 Migration 한시적 예외가 "
+                "충돌한다."
+            ),
+            sources=[
+                common_semantic_source,
+                (
+                    EVIDENCE_SOURCE_TYPE,
+                    "chunk-old",
+                    "이전 인터뷰 근거",
+                ),
+            ],
+            context_difference=(
+                "초기 Migration 단계에서의 "
+                "Shared Database 예외 조건"
+            ),
+        )
+    )
+
+    visible = (
+        select_visible_conflict_ids(
+            [
+                newest,
+                older,
+            ]
+        )
+    )
+
+    assert visible == {
+        "newest",
+    }
+
+
+def test_same_semantic_sources_with_different_contexts_are_not_merged():
+    sources = [
+        (
+            BASELINE_CLAIM_SOURCE_TYPE,
+            "claim-shared-db",
+            "Shared Database 사용을 금지한다.",
+        ),
+    ]
+
+    migration_conflict = (
+        build_conflict_canonicalization_record(
+            conflict_id="migration",
+            interview_id="interview-1",
+            conflict_type=(
+                "CONDITIONAL_CONFLICT"
+            ),
+            description=(
+                "Shared Database 금지 원칙과 "
+                "예외 허용 조건이 충돌한다."
+            ),
+            sources=sources,
+            context_difference=(
+                "초기 Migration 단계의 "
+                "Shared Database 예외 조건"
+            ),
+        )
+    )
+
+    incident_conflict = (
+        build_conflict_canonicalization_record(
+            conflict_id="incident",
+            interview_id="interview-1",
+            conflict_type=(
+                "CONDITIONAL_CONFLICT"
+            ),
+            description=(
+                "Shared Database 금지 원칙과 "
+                "예외 허용 조건이 충돌한다."
+            ),
+            sources=sources,
+            context_difference=(
+                "장애 대응 중 긴급 "
+                "직접 조회 예외 조건"
+            ),
+        )
+    )
+
+    visible = (
+        select_visible_conflict_ids(
+            [
+                migration_conflict,
+                incident_conflict,
+            ]
+        )
+    )
+
+    assert visible == {
+        "migration",
+        "incident",
+    }
+
+
+def test_evidence_only_conflicts_require_same_evidence_set():
+    first = (
+        build_conflict_canonicalization_record(
+            conflict_id="first",
+            interview_id="interview-1",
+            conflict_type=(
+                "CONDITIONAL_CONFLICT"
+            ),
+            description=(
+                "동일한 표현의 충돌 설명"
+            ),
+            sources=[
+                (
+                    EVIDENCE_SOURCE_TYPE,
+                    "chunk-1",
+                    "첫 번째 근거",
+                ),
+            ],
+        )
+    )
+
+    second = (
+        build_conflict_canonicalization_record(
+            conflict_id="second",
+            interview_id="interview-1",
+            conflict_type=(
+                "CONDITIONAL_CONFLICT"
+            ),
+            description=(
+                "동일한 표현의 충돌 설명"
+            ),
+            sources=[
+                (
+                    EVIDENCE_SOURCE_TYPE,
+                    "chunk-2",
+                    "두 번째 근거",
+                ),
+            ],
+        )
+    )
+
+    visible = (
+        select_visible_conflict_ids(
+            [
+                first,
+                second,
+            ]
+        )
+    )
+
+    assert visible == {
+        "first",
+        "second",
+    }
+

@@ -25,12 +25,32 @@ UNKNOWN_SOURCE_TYPE = (
 )
 
 
-# 동일 Source 집합에서 Description까지
-# 상당히 유사한 경우에만 반복 Conflict로 본다.
+# Conflict canonicalization은 DB history를 변경하지 않고
+# Mission 조회 결과에서 반복 노출만 줄이는 presentation 정책이다.
 #
-# 단순히 Source가 같다는 이유만으로
-# 서로 다른 atomic issue를 합치지 않는다.
-DUPLICATE_DESCRIPTION_SIMILARITY = 0.84
+# 동일 Interview / 동일 Conflict Type / 동일 semantic source 축을
+# 전제로 Description까지 유사한 경우 같은 Conflict family로 본다.
+#
+# Evidence source는 Turn마다 retrieval 결과가 달라질 수 있으므로
+# semantic source가 존재하는 cross-turn 비교에서는 exact equality를
+# 강제하지 않는다. 대신 Description과 context_difference를 함께 본다.
+DUPLICATE_DESCRIPTION_SIMILARITY = 0.72
+EVIDENCE_ONLY_DESCRIPTION_SIMILARITY = 0.84
+CONTEXT_DIFFERENCE_MIN_SIMILARITY = 0.45
+
+
+# 실제 E2E에서 같은 본질의 Conflict가 Turn마다
+# source 조합/description을 달리하며 반복되는 패턴이 확인되었다.
+#
+# 아래 semantic family는 확실한 subject/context 축이 잡히는 경우에만
+# 기존 exact-source 정책보다 한 단계 넓게 canonicalize한다.
+#
+# 현재 PoC에서 strong family로 다루는 범위:
+#   Database isolation 원칙
+#   ↔ Migration / Incident 상황의 한시적 Shared Database 예외
+#
+# 다른 주제는 기존 보수적인 source/description 정책으로 fallback한다.
+DATABASE_ISOLATION_FAMILY = "DATABASE_ISOLATION"
 
 
 @dataclass(frozen=True)
@@ -47,8 +67,12 @@ class ConflictCanonicalizationRecord:
 
     conflict_id: str
     interview_id: str
+    analysis_id: str
     conflict_type: str
+    severity: str
     description: str
+    context_difference: str
+    semantic_family: str | None
 
     semantic_source_keys: frozenset[str]
     evidence_source_keys: frozenset[str]
@@ -60,9 +84,29 @@ def _normalize_text(
     if not value:
         return ""
 
+    normalized = value.lower()
+
+    replacements = {
+        r"shared\s+database": " shared_database ",
+        r"shared\s+db": " shared_database ",
+        r"database\s+per\s+service": " database_per_service ",
+        r"migration": " migration ",
+        r"마이그레이션": " migration ",
+        r"독립적인\s+데이터베이스": " database_per_service ",
+        r"독립\s+데이터베이스": " database_per_service ",
+    }
+
+    for pattern, replacement in replacements.items():
+        normalized = re.sub(
+            pattern,
+            replacement,
+            normalized,
+            flags=re.IGNORECASE,
+        )
+
     tokens = re.findall(
         r"[A-Za-z0-9가-힣_]+",
-        value.lower(),
+        normalized,
     )
 
     return " ".join(tokens)
@@ -366,6 +410,302 @@ def _build_source_key(
     return None
 
 
+
+def _contains_any(
+    text: str,
+    values: Sequence[str],
+) -> bool:
+    return any(
+        value in text
+        for value in values
+    )
+
+
+def _conflict_context_family(
+    text: str,
+) -> str:
+    """
+    같은 Database isolation 주제라도 Migration 예외와
+    장애/긴급 예외를 하나의 Conflict로 합치지 않기 위한 축.
+    """
+
+    if _contains_any(
+        text,
+        (
+            "장애",
+            "긴급",
+            "incident",
+            "emergency",
+        ),
+    ):
+        return "INCIDENT"
+
+    if _contains_any(
+        text,
+        (
+            "migration",
+            "전환",
+            "레거시",
+            "과도기",
+            "초기 단계",
+        ),
+    ):
+        return "MIGRATION"
+
+    if _contains_any(
+        text,
+        (
+            "평상시",
+            "일반 운영",
+            "정상 운영",
+        ),
+    ):
+        return "NORMAL"
+
+    return "GENERAL"
+
+
+def _derive_semantic_family(
+    description: str,
+    context_difference: str | None,
+    sources: Sequence[
+        tuple[
+            str,
+            str | None,
+            str,
+        ]
+    ],
+) -> str | None:
+    """
+    Cross-turn family canonicalization용 strong semantic key.
+
+    source_id exact set이 Turn마다 달라져도,
+    모든 텍스트가 동일한 Database isolation 원칙과
+    동일한 context의 한시적 예외를 다루면 같은 family로 본다.
+
+    family를 확실히 만들 수 없는 Conflict는 None을 반환하여
+    기존 strict source-set/description 정책으로 fallback한다.
+    """
+
+    source_text = " ".join(
+        content
+        for _, _, content in sources
+        if content
+    )
+
+    text = _normalize_text(
+        " ".join(
+            value
+            for value in (
+                description,
+                context_difference or "",
+                source_text,
+            )
+            if value
+        )
+    )
+
+    has_database_isolation_subject = (
+        _contains_any(
+            text,
+            (
+                "shared_database",
+                "database_per_service",
+            ),
+        )
+    )
+
+    if not has_database_isolation_subject:
+        return None
+
+    has_exception_axis = _contains_any(
+        text,
+        (
+            "예외",
+            "허용",
+            "유예",
+            "연장",
+            "한시",
+            "임시",
+            "유지할 수",
+        ),
+    )
+
+    if not has_exception_axis:
+        return None
+
+    context_family = _conflict_context_family(
+        text
+    )
+
+    # GENERAL까지 자동 family merge하면 unrelated DB Conflict가
+    # 과도하게 합쳐질 수 있으므로 구체적 context가 있을 때만 사용한다.
+    if context_family == "GENERAL":
+        return None
+
+    return (
+        f"{DATABASE_ISOLATION_FAMILY}:"
+        f"{context_family}:EXCEPTION"
+    )
+
+
+def _severity_rank(
+    severity: str,
+) -> int:
+    ranks = {
+        "LOW": 1,
+        "MEDIUM": 2,
+        "HIGH": 3,
+        "CRITICAL": 4,
+    }
+
+    return ranks.get(
+        (severity or "").upper(),
+        0,
+    )
+
+
+def _family_representative_score(
+    record: ConflictCanonicalizationRecord,
+) -> tuple[int, int, int]:
+    """
+    같은 최신 Turn 안에 동일 family Conflict가 여러 개 있으면
+    source가 가장 풍부한 Conflict를 대표값으로 선택한다.
+
+    동일하면 severity, description 정보량 순으로 결정한다.
+    """
+
+    source_count = (
+        len(record.semantic_source_keys)
+        + len(record.evidence_source_keys)
+    )
+
+    return (
+        source_count,
+        _severity_rank(
+            record.severity
+        ),
+        len(
+            _normalize_text(
+                record.description
+            )
+        ),
+    )
+
+
+def _select_family_representatives(
+    records: Sequence[
+        ConflictCanonicalizationRecord
+    ],
+) -> list[
+    ConflictCanonicalizationRecord
+]:
+    """
+    records는 최신 -> 과거 순서다.
+
+    strong semantic family가 있는 경우:
+    - 가장 최신 Analysis(Turn)를 family의 현재 대표 Turn으로 잡는다.
+    - 그 Turn 안에서 source 정보가 가장 풍부한 Conflict 한 건을 남긴다.
+    - 이전 Turn의 같은 family Conflict는 presentation에서 숨긴다.
+
+    raw DB/history는 전혀 변경하지 않는다.
+    """
+
+    result: list[
+        ConflictCanonicalizationRecord
+    ] = []
+    processed_family_keys: set[
+        tuple[
+            str,
+            str,
+            str,
+        ]
+    ] = set()
+
+    for record in records:
+        if record.semantic_family is None:
+            result.append(
+                record
+            )
+            continue
+
+        family_key = (
+            record.interview_id,
+            record.conflict_type,
+            record.semantic_family,
+        )
+
+        if family_key in processed_family_keys:
+            continue
+
+        processed_family_keys.add(
+            family_key
+        )
+
+        latest_analysis_id = (
+            record.analysis_id
+        )
+
+        # 단위 테스트/외부 호출처럼 analysis_id가 없는 Record는
+        # 입력 순서(최신 -> 과거)를 신뢰하고 첫 Record 자체를
+        # 대표값으로 사용한다.
+        #
+        # analysis_id가 없는 상태에서 모든 동일 family Record를
+        # 한 Turn으로 간주해 정보량 max를 선택하면 과거 Record가
+        # 최신 Record를 역전할 수 있다.
+        if not latest_analysis_id:
+            result.append(
+                record
+            )
+            continue
+
+        same_latest_turn_family = [
+            candidate
+            for candidate in records
+            if (
+                candidate.interview_id
+                == record.interview_id
+                and candidate.conflict_type
+                == record.conflict_type
+                and candidate.semantic_family
+                == record.semantic_family
+                and candidate.analysis_id
+                == latest_analysis_id
+            )
+        ]
+
+        if not same_latest_turn_family:
+            result.append(
+                record
+            )
+            continue
+
+        representative = max(
+            same_latest_turn_family,
+            key=_family_representative_score,
+        )
+
+        result.append(
+            representative
+        )
+
+    # 원래 최신순 순서를 최대한 유지한다.
+    order = {
+        record.conflict_id: index
+        for index, record in enumerate(
+            records
+        )
+    }
+
+    result.sort(
+        key=lambda item: order.get(
+            item.conflict_id,
+            len(order),
+        )
+    )
+
+    return result
+
 def build_conflict_canonicalization_record(
     conflict_id: str,
     interview_id: str,
@@ -378,6 +718,9 @@ def build_conflict_canonicalization_record(
             str,
         ]
     ],
+    context_difference: str | None = None,
+    analysis_id: str | None = None,
+    severity: str | None = None,
 ) -> ConflictCanonicalizationRecord:
     """
     Mission Conflict 조회용 Canonicalization Record 생성.
@@ -431,6 +774,16 @@ def build_conflict_canonicalization_record(
                 source_key
             )
 
+    semantic_family = (
+        _derive_semantic_family(
+            description=description,
+            context_difference=(
+                context_difference
+            ),
+            sources=sources,
+        )
+    )
+
     return ConflictCanonicalizationRecord(
         conflict_id=str(
             conflict_id
@@ -438,10 +791,24 @@ def build_conflict_canonicalization_record(
         interview_id=str(
             interview_id
         ),
+        analysis_id=(
+            str(analysis_id)
+            if analysis_id is not None
+            else ""
+        ),
         conflict_type=(
             conflict_type
         ),
+        severity=(
+            severity or ""
+        ),
         description=description,
+        context_difference=(
+            context_difference or ""
+        ),
+        semantic_family=(
+            semantic_family
+        ),
         semantic_source_keys=frozenset(
             semantic_source_keys
         ),
@@ -480,17 +847,61 @@ def _description_similarity(
     ).ratio()
 
 
+def _context_difference_compatible(
+    left: ConflictCanonicalizationRecord,
+    right: ConflictCanonicalizationRecord,
+) -> bool:
+    """
+    같은 source 축이라도 적용 조건이 완전히 다른 Conflict를
+    하나로 합치지 않기 위한 guard.
+
+    둘 중 한쪽에 context_difference가 없으면 Description + Source
+    신호만 사용한다. 양쪽 모두 값이 있으면 최소 유사도를 요구한다.
+    """
+
+    left_context = _normalize_text(
+        left.context_difference
+    )
+    right_context = _normalize_text(
+        right.context_difference
+    )
+
+    if not left_context or not right_context:
+        return True
+
+    similarity = _description_similarity(
+        left.context_difference,
+        right.context_difference,
+    )
+
+    return (
+        similarity
+        >= CONTEXT_DIFFERENCE_MIN_SIMILARITY
+    )
+
+
 def _is_semantic_duplicate(
     left: ConflictCanonicalizationRecord,
     right: ConflictCanonicalizationRecord,
 ) -> bool:
     """
-    동일 Interview / 동일 Conflict Type /
-    동일 Source Set이면서 Description까지
-    매우 유사한 경우에만 반복 Conflict로 처리한다.
+    Mission 화면의 cross-turn 반복 Conflict를 보수적으로 축약한다.
 
-    Source Set만 같고 Description이 다른
-    atomic issue는 합치지 않는다.
+    동일 Interview / 동일 Conflict Type은 필수다.
+
+    semantic source(BASELINE_CLAIM / KNOWLEDGE_UNIT 등)가 있는 경우:
+    - semantic source set이 정확히 같아야 한다.
+    - Evidence retrieval source는 Turn마다 달라도 허용한다.
+    - Description이 충분히 유사해야 한다.
+    - 양쪽 context_difference가 있으면 서로 호환되어야 한다.
+
+    semantic source가 전혀 없고 Evidence만 있는 경우:
+    - 기존 정책처럼 Evidence source set exact match를 요구한다.
+    - 더 높은 Description threshold를 유지한다.
+
+    따라서 같은 Baseline 원칙을 두고 Turn마다 다른 Document Chunk가
+    근거로 붙은 반복 Conflict는 최신 1건으로 줄일 수 있지만,
+    source 축 자체가 다른 atomic issue는 합치지 않는다.
     """
 
     if (
@@ -505,21 +916,49 @@ def _is_semantic_duplicate(
     ):
         return False
 
+    if not _context_difference_compatible(
+        left,
+        right,
+    ):
+        return False
+
     if (
         left.semantic_source_keys
-        != right.semantic_source_keys
+        or right.semantic_source_keys
+    ):
+        if (
+            not left.semantic_source_keys
+            or not right.semantic_source_keys
+        ):
+            return False
+
+        if (
+            left.semantic_source_keys
+            != right.semantic_source_keys
+        ):
+            return False
+
+        similarity = (
+            _description_similarity(
+                left.description,
+                right.description,
+            )
+        )
+
+        return (
+            similarity
+            >= DUPLICATE_DESCRIPTION_SIMILARITY
+        )
+
+    if (
+        not left.evidence_source_keys
+        or not right.evidence_source_keys
     ):
         return False
 
     if (
         left.evidence_source_keys
         != right.evidence_source_keys
-    ):
-        return False
-
-    if not (
-        left.semantic_source_keys
-        or left.evidence_source_keys
     ):
         return False
 
@@ -532,7 +971,7 @@ def _is_semantic_duplicate(
 
     return (
         similarity
-        >= DUPLICATE_DESCRIPTION_SIMILARITY
+        >= EVIDENCE_ONLY_DESCRIPTION_SIMILARITY
     )
 
 
@@ -577,8 +1016,11 @@ def select_visible_conflict_ids(
     입력 순서는 최신 Conflict → 과거 Conflict여야 한다.
 
     정책 1.
-    동일 Source Set + 유사 Description의 반복 Conflict는
+    같은 Interview에서 동일 semantic source 축을 갖는
+    유사 Conflict는 Evidence source가 Turn마다 달라도
     최신 Conflict 하나만 노출한다.
+
+    서로 다른 Interview 간에는 dedupe하지 않는다.
 
     정책 2.
     하나의 Conflict Source Set이
@@ -599,6 +1041,19 @@ def select_visible_conflict_ids(
     서로 다른 Interview 간에는 dedupe하지 않는다.
     """
 
+    # -----------------------------------------------------
+    # 0. Strong cross-turn semantic family canonicalization
+    #
+    # E2E에서 같은 Database isolation conflict가
+    # Turn마다 다른 source 조합/문장으로 반복되는 패턴을 먼저 축약한다.
+    # family를 만들 수 없는 Conflict는 그대로 다음 strict 단계로 넘긴다.
+    # -----------------------------------------------------
+    family_records = (
+        _select_family_representatives(
+            records
+        )
+    )
+
     deduplicated_records: list[
         ConflictCanonicalizationRecord
     ] = []
@@ -609,7 +1064,7 @@ def select_visible_conflict_ids(
     # records가 최신순이므로 먼저 등장한 row가
     # 최신 Conflict다.
     # -----------------------------------------------------
-    for record in records:
+    for record in family_records:
         is_duplicate = any(
             _is_semantic_duplicate(
                 existing,
